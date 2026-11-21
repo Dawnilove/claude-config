@@ -12,7 +12,7 @@ import type { Mood } from './art'
 import { APP_ID_FORMAT, closable, countAsks, deadLabel, purgeable, groupOf, isDead, isNestedSession, judge, openAsk, openReport, optionsLine, orphanIds, parseAsk, parseReport } from './asks'
 import type { Ask, Group, Report } from './asks'
 import { countAgentCall, register as registerAgents, startAgentTicker } from './agents'
-import { bandPrompt, bandStart, bandTurnDone, register as registerBand, setAskCounter } from './band'
+import { bandPrompt, bandStart, bandSubTurn, bandToolCheck, bandToolDone, bandTurnDone, register as registerBand, setAskCounter, toggleCalibrate } from './band'
 import { register as registerGuard } from './guard'
 import { register as registerSecrets } from './secrets'
 import { cardAsk, lastTurn, signalsOf } from './signals'
@@ -443,6 +443,11 @@ export const register: Register = (on, options) => {
   })
 
   on('command.run', { command: 'session_board' }, async ($, e) => {
+    // 보정 화면: 띠에 px 눈금과 알려진 부품을 잠깐 그린다. 실제 앱의 px 를 스크린샷 한 장으로 재려고 만들었다
+    if (e.args.trim() === '보정' || e.args.trim() === 'calibrate') {
+      const shown = toggleCalibrate($)
+      return { text: shown ? '띠에 보정 화면을 켰습니다. 띠 전체가 보이게 화면을 찍어 주십시오. 끄려면 /session_board 보정 을 다시 입력합니다.' : '띠의 보정 화면을 껐습니다.' }
+    }
     // 그려지고 있으면 닫는다. 열어 두려 했지만 아직 못 그리는 중이면(좁은 창), 사용자가 시킨 열기로 다시 연다
     // "open" 이면 닫지 않고 열기만 한다: relay-band 띠의 고양이 옆 개수 단추가 이렇게 부른다
     if (e.args.trim() !== 'open' && (await $.ui.panes()).some(p => p.id === PANE_ID && p.isPlaced)) {
@@ -492,7 +497,10 @@ export const register: Register = (on, options) => {
 
   // 턴이 끝났다. 하위 에이전트의 턴은 판정하지 않는다. 판정이 실패해도 턴의 결과는 바꾸지 않는다
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined) {
+      bandSubTurn(e) // 띠의 작업 묶음: 하위 에이전트 토큰
+      return next(e)
+    }
     const wasUserTurn = isUserTurn
     const from = turnStartCount
     isUserTurn = false
@@ -519,13 +527,18 @@ export const register: Register = (on, options) => {
   // 질문·계획 승인은 tool.call 이 따로 잡는다. 승인이 끝난 때를 알려 주는 이벤트는 없어서, 도구가 끝나거나(tool.call 의 next 가 돌아옴) 턴이 끝나야 풀린다.
   on('tool.check', async ($, e, next) => {
     const result = await next(e)
+    bandToolCheck(result) // 띠의 품질 묶음: 권한 질문 수
     if (e.agentId === undefined && e.tool_use_id !== undefined && result.decision === 'ask' && e.tool !== 'AskUserQuestion' && e.tool !== 'ExitPlanMode') await go($, 'waiting', waitLabel(e.tool))
     return result
   })
 
   on('tool.call', async ($, e, next) => {
     countAgentCall(e) // 하위 에이전트 칸의 호출 수
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined) {
+      const ran = await next(e)
+      bandToolDone(e, ran) // 띠의 작업 묶음: 도구 호출·편집 (하위 에이전트 포함)
+      return ran
+    }
     if (e.tool === 'TodoWrite') {
       // CLI 의 작업 목록: 호출마다 목록 전체가 온다
       const raw = (e as any).todos
@@ -541,6 +554,7 @@ export const register: Register = (on, options) => {
     const isCard = e.tool === 'AskUserQuestion' && cardAsk(e as any) !== undefined
     if (isCard) await sync($, signalsOf('', [{ tool_use_id: '', tool: e.tool, input: e as never }]), false).catch(() => undefined)
     const result = await next(e)
+    bandToolDone(e, result) // 띠의 작업 묶음: 도구 호출·편집
     if (isCard) isUserTurn = true // 카드에 답한 것은 사용자의 입력이다. 이 턴이 신호 없이 끝나면 칸을 닫는다
     if (me?.state === 'waiting') await go($, 'running') // 질문에 답했거나, 승인되어 도구가 끝났다
     return result
