@@ -1,6 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DEFAULT_FRAMES, FRAMES, catState, catSvg, isShown } from './agents'
+import { DEFAULT_FRAMES, FRAMES, catState, isShown } from './agents'
+import { avatarSvg } from './art'
+import { bandCatSvg } from './band'
+import { catMotionSvg, catSvg, hashMs } from './cat'
 
 test('끝난 지 5분이 지난 에이전트는 그리지 않는다. 실행 중이면 오래돼도 그린다', () => {
   const now = 10 * 60_000
@@ -21,6 +24,56 @@ test('고양이 64장은 원본 도트판과 같은 길이로 만들어진다', 
   }
   // 모르는 유형은 기본 고양이, 프레임은 4로 돌아간다
   expect(catSvg('run', 4, 'Explore')).toBe(catSvg('run', 0, 'Explore'))
+})
+
+// 위상(ms)에 따라 맨 앞에 보이는 장. SMIL 을 못 그리는 화면은 이 장만 보인다
+const shown = (svg: string) => svg.match(/<g class="cat-m"><animate [^>]*\/>(.*?)<\/g>/)![1]
+
+test('고양이는 상태마다 네 장을 SVG 안에서 돌리고(SMIL), 위상 한 바퀴(1초, 대기 2초)면 같아지며 Svg 한도 안이다', () => {
+  const firsts = new Set<string>()
+  for (const st of ['run', 'done', 'fail', 'idle'] as const) {
+    const step = st === 'idle' ? 500 : 250
+    const frames = new Set([0, 1, 2, 3].map((k) => shown(catMotionSvg(st, 'default', k * step))))
+    expect(frames.size).toBeGreaterThanOrEqual(2) // 완료·실패는 같은 장이 되풀이되지만 움직인다
+    expect(catMotionSvg(st, 'default', 4 * step)).toBe(catMotionSvg(st, 'default', 0))
+    expect(catMotionSvg(st, 'default', 0).split('<animate ').length - 1).toBe(4)
+    expect(catMotionSvg(st, 'default', 0).length).toBeLessThan(131072) // Svg 요소의 한도
+    firsts.add(shown(catMotionSvg(st, 'default', 0)))
+  }
+  expect(firsts.size).toBe(4) // 상태마다 그림이 다르다
+  expect(catMotionSvg('run', 'default', -250)).toBe(catMotionSvg('run', 'default', 750))
+})
+
+test('시작 시각이 다른 고양이는 같은 순간에 다른 장을 보이고, 장 안에서 지난 몫은 음수 begin 으로 이어진다', () => {
+  const a = catMotionSvg('run', 'default', 300) // 300ms 전에 시작
+  const b = catMotionSvg('run', 'default', 800) // 800ms 전에 시작
+  expect(shown(a)).not.toBe(shown(b)) // 300ms → 2번째 장, 800ms → 4번째 장
+  expect(a).toContain('begin="-0.05s"') // 2번째 장에 들어온 지 50ms
+  expect(catMotionSvg('run', 'default', 0)).not.toContain('begin=') // 장 경계면 begin 이 없다
+  expect(shown(catMotionSvg('run', 'default', 260))).toBe(shown(catMotionSvg('run', 'default', 499))) // 같은 장 안이면 같은 장
+  expect(shown(catMotionSvg('run', 'default', 0))).toBe(catSvg('run', 0, 'default').replace(/^<svg[^>]*>|<\/svg>$/g, '')) // 맨 앞 장 = 정지 그림
+})
+
+test('세션 카드·띠 아바타도 움직이고, 위상(시작 시각 + id 해시)이 다르면 같은 순간에 다른 장을 보인다', () => {
+  expect(shown(avatarSvg('running', 1_000))).not.toBe(shown(avatarSvg('running', 1_300)))
+  expect(avatarSvg('running', 0).split('<animate ').length - 1).toBe(4)
+  expect(avatarSvg('request')).toContain('use href="#flag"')
+  expect(bandCatSvg('zz', 0).split('<animate ').length - 1).toBe(4)
+  for (const id of ['a', 'session-1', '7f3c']) {
+    expect(hashMs(id)).toBe(hashMs(id))
+    expect(hashMs(id) >= 0 && hashMs(id) < 1000).toBe(true)
+  }
+  expect(hashMs('session-1')).not.toBe(hashMs('session-2'))
+})
+
+test('움직임 줄이기: 어느 그림이든 도는 장을 숨기는 규칙과, 맨 앞 장과 같은 정지 장 하나를 담는다', () => {
+  for (const svg of [catMotionSvg('run', 'default', 300), avatarSvg('running', 300), bandCatSvg('zz', 300)]) {
+    expect(svg).toContain('@media (prefers-reduced-motion: reduce){.cat-m{display:none}.cat-still{display:inline}}')
+    expect(svg.split('class="cat-m"').length - 1).toBe(4) // 도는 장 넷
+    const still = svg.match(/<g class="cat-still" display="none">(.*?)<\/g>/)![1]
+    expect(still).toBe(shown(svg)) // 정지 장 = 위상에 맞는 맨 앞 장
+    expect(still).not.toContain('<animate') // 정지 장은 움직이지 않는다
+  }
 })
 
 test('에이전트 상태는 고양이 상태 네 가지로 빠짐없이 옮겨진다', () => {
