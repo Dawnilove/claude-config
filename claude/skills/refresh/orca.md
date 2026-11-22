@@ -15,10 +15,11 @@
 - 파일을 고치는 일: 새 작업 공간(새 체크아웃)으로 연다. 같은 파일을 두 세션이 고치지 않는다.
 
   ```text
-  ORCA worktree create --repo path:<저장소 경로> --name "<이름>" --parent-worktree current --agent claude --model <모델 id> --effort <수준> --prompt "<브리프>" --json
+  ORCA worktree create --project <프로젝트 이름 또는 id> --name "<이름>" --parent-worktree current --agent claude --model <모델 id> --effort <수준> --prompt "<브리프>" --json
   ```
 
-  - 저장소가 Orca 프로젝트로 등록되어 있어야 한다 (`ORCA repo list --json`). 없으면 사용자에게 묻고 `ORCA repo add --path <경로> --json`으로 등록한다.
+  - `--project`는 PC마다 경로가 달라도 같은 명령으로 돈다. 프로젝트 id는 git 원격 주소에서 나온다 (예: `github:dawnilove/claude-config`). `ORCA project list --json`으로 이름과 id를 찾는다.
+  - 저장소가 Orca 프로젝트로 등록되어 있어야 한다. 없으면 사용자에게 묻고 `ORCA repo add --path <경로> --json`으로 등록한다. 등록이 없는 PC에서 프로젝트만 있으면 `ORCA project setup-clone`으로 받는다.
   - 새 작업 공간은 `~/orca/workspaces/<저장소>/<이름>`에 생기고 브랜치는 `<계정>/<이름>`이다. 결과의 `result.worktree.path`와 `branch`를 보고에 쓴다.
   - 에이전트는 사용자의 Chat | CLI 설정대로 열린다 (2026-11-22 시험: chat).
 
