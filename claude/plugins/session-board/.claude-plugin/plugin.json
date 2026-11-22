@@ -2,5 +2,13 @@
   "name": "session-board",
   "version": "0.5.0",
   "license": "MIT",
-  "description": "오른쪽 패널 하나와 입력창 위 띠 한 줄. 패널: 세션 상태와 결재·알림·확인(위), 실행 중인 하위 에이전트(아래). 파일을 깨뜨리는 명령과 비밀 파일 읽기는 거부한다. 띠: 고양이 옆 결재·알림 개수 단추(누르면 패널), 검증 결과, 컨텍스트, 주간 한도, 턴 시간, 캐시."
+  "description": "오른쪽 패널 하나와 입력창 위 띠 한 줄. 패널: 세션 상태와 결재·알림·확인(위), 실행 중인 하위 에이전트(아래). 파일을 깨뜨리는 명령과 비밀 파일 읽기는 거부한다. 띠: 고양이 옆 결재·알림 개수 단추(누르면 패널), 검증 결과, 컨텍스트, 주간 한도, 턴 시간, 캐시.",
+  "userConfig": {
+    "rulegateStateDir": {
+      "type": "string",
+      "title": "rulegate state folder",
+      "description": "Optional. Folder that holds <session id>/decisions.jsonl written by the rulegate command-judging hook. Set it to show a rulegate cell in the unfolded grid. Empty hides the cell.",
+      "default": ""
+    }
+  }
 }

@@ -5,11 +5,17 @@
 
 import type { Register } from 'claude-code'
 
-import { CAT, fmtDur, isWide, tw } from './art'
+import { CAT, fmtDur } from './art'
+import { BAND_LEVEL, GROUP_NAMES, MIN_CELL_W, askPillSvg, bandStats, bandSvg, catAvatar, panelHead, panelPics, sizeOf, svgDoc } from './band-ui'
+import type { Pic, Rich, Tone } from './band-ui'
+import { GAP, HOST, color, hostButtonPx, hostTextPx } from './tokens'
+
+export { askPillSvg, bandSvg } from './band-ui' // 시험이 이 모듈에서 읽는다
 
 const DAY = 86_400_000
 // ponytail 줄의 안쪽 여백에 맞추는 들여쓰기 칸 수(데스크톱 화면만). 화면에서 보고 어긋나면 이 값만 바꾼다.
-const INDENT = 1
+// 0: 바와 격자가 띠 틀 폭을 꽉 채운다. 띠는 플러그인마다 따로 묻는 줄이라 ponytail 줄과 한 상자에 있지 않다
+const INDENT = 0
 // shortcut: ponytail 띠가 이미 비용을 보여줘서 뺐다. ponytail 없이 쓰면 true 로 바꾼다.
 const SHOW_COST = false
 const HISTORY = 12
@@ -59,8 +65,42 @@ let history: number[] = []
 let ticker: { cancel: () => void } | null = null
 let lastUsageAt = 0
 let limitKinds: string[] = [] // 진단용: 엔진이 알려 준 한도 창의 종류
-let showDetail = false // "상세 ▾" 펼침 상태
-// 노력 수준 제안 (생각은 effortless 에서, 2026-11-18 사용자 결정: 흡수). 띠는 제안만 한다. 수준은 사용자가 바꾼다
+let showDetail = false // "세부 ▾" 펼침 상태
+let animateNext = false // 펼친 뒤 첫 그리기에서만 칸이 들어온다. 5초 갱신·측정으로 다시 그려도 반복하지 않는다
+// 펼친 격자는 바와 한 상자다. 묶음 탭(앱 단추) 5개 중 하나를 고르면 그 묶음 칸을 보인다.
+// 쪽 넘김과 휠(ui.scroll)은 쓰지 않는다: 실제 화면에서 휠은 한쪽으로만 넘어갔다. 탭은 눈에 보이는 단추라 늘 된다
+let panelGroup = 0 // 고른 묶음 (한도·토큰·비용·시간·작업·품질)
+// 작업·품질 묶음의 항목 (모드가 로드된 뒤부터 센다. /reload-plugins 뒤에는 0 부터)
+let tools = { calls: 0, errors: 0, denies: 0, by: {} as Record<string, number> } // tool.call: 도구 이름, 결과 isError·deny (하위 에이전트 포함)
+let edits = { files: new Set<string>(), added: 0, removed: 0 } // Edit·Write·MultiEdit 입력의 줄 수 (Write 는 쓴 줄만 셈)
+let compacts = { auto: 0, manual: 0 } // session.compact 의 trigger
+let asked = 0 // tool.check 결정이 ask 인 수 (사용자에게 승인을 물음)
+let modelNow: string | null = null // turn.step 의 model (본 에이전트)
+let aborted = 0 // turn.complete 의 isAborted (본 에이전트)
+let subTokens = 0 // 하위 에이전트 turn.complete 의 usage 합 (새 입력 + 캐시 쓰기 + 출력)
+// OpenSpec 진행률(그 작업이 몇 퍼센트 끝났는지):
+// <세션 cwd>/openspec/changes/*/tasks.md (archive 제외)의 체크 수 / 전체 체크 수. 세션 시작, 본 에이전트 턴 끝, 30초마다 읽는다.
+// worktree 세션은 자기 브랜치의 openspec/ 을 본다(main 과 다를 수 있다): 그래서 브랜치를 함께 보인다
+let spec: SpecState | null = null
+let specTicks = 0
+const SPEC_EVERY = 6 // tick(5초) x 6 = 30초
+const SPEC_MAX_BYTES = 256 * 1024 // 이보다 큰 tasks.md 는 읽지 않는다
+// 펼친 격자의 항목과 원천. 원천이 값을 주지 않으면 칸은 빈 상태("아직 값 없음")로 남는다
+let five: { percent: number; resetsAt?: string } | null = null // 5시간 한도: $.session.usage().rateLimits 의 five_hour
+let startedAt = 0 // 세션 시작: $.session.usage().startedAt
+let turnCount: number | null = null // 턴 수: $.session.turns()
+let hits: number[] = [] // 캐시 적중률: turn.complete 의 usage (cache_read / (input + cache_read + cache_creation))
+let turnTokens: TurnTokens[] = [] // 턴 토큰: turn.complete 의 usage (새 입력 · 캐시 읽기 · 캐시 쓰기 · 출력)
+let costs: number[] = [] // 턴 비용: $.session.usage().cost.usd 의 턴 사이 차이
+let lastCost: number | null = null
+let secs: number[] = [] // 턴 시간: prompt.submit ~ turn.complete 의 $.clock.now() 차이
+let verifies: ('ok' | 'warn' | 'err')[] = [] // 검증: runVerify 결과
+let agentCounts: { running: number; waiting: number; done: number; failed: number } | null = null // 하위 에이전트: $.agent.list() 의 상태별 수
+// rulegate(명령 판정 훅) 관찰: 이 세션의 decisions.jsonl. 상태 폴더 설정(userConfig rulegateStateDir)이 비었거나 이 세션 기록이 없으면 null 이고 칸은 나오지 않는다
+let rules: { block: number; ask: number; warn: number } | null = null
+let sessionId = ''
+let rulegateDir = '' // <폴더>/<session_id>/decisions.jsonl 을 읽는다. 비어 있으면 읽지 않는다
+// 노력 수준 제안. 띠는 제안만 한다. 수준은 사용자가 바꾼다
 let effortNow: string | undefined // 이 세션 본 에이전트의 지금 수준 (turn.step)
 let effortNeed: string | null = null // Claude 가 답에서 말한 필요한 수준. 새로 말할 때까지 남긴다
 // 컨텍스트가 이만큼 차면 띠에 "인계 ▸" 단추를 둔다. 세션을 짧게 끊고 HANDOFF.md 로 넘기는 규칙을 지키기 쉽게
@@ -102,10 +142,12 @@ export async function bandStart($: any) {
   ticker = $.clock.every(5000, () => tick($))
   try {
     applyUsage(await $.session.usage())
+    lastCost = costUsd // 턴 비용은 이 값과의 차이로 센다
     await trackDay($)
   } catch {
     // 사용량을 아직 못 읽어도 띠는 나머지 칸으로 뜬다
   }
+  await refreshSpec($) // OpenSpec 진행률: 세션 시작
   $.ui.invalidate('ui.render')
 }
 
@@ -140,6 +182,20 @@ export async function bandTurnDone($: any, e: any) {
   lastTurnSec = Math.round((now - turnStartedAt) / 1000)
   lastAnswerAt = now
   if (context) history = [...history, context.percent].slice(-HISTORY)
+  if (turnStartedAt > 0) secs = [...secs, lastTurnSec].slice(-HISTORY)
+  if (e?.isAborted === true) aborted += 1
+  const u = turnUsage(e.usage)
+  if (u) {
+    turnTokens = [...turnTokens, { fresh: u.fresh, read: u.read, write: u.write, output: u.output }].slice(-HISTORY)
+    if (u.hit !== null) hits = [...hits, u.hit].slice(-HISTORY)
+  }
+  try {
+    applyUsage(await $.session.usage())
+    if (costUsd !== null && lastCost !== null) costs = [...costs, Math.max(0, costUsd - lastCost)].slice(-HISTORY)
+    lastCost = costUsd
+  } catch {
+    // 사용량을 못 읽으면 이번 턴 비용은 빼고 넘어간다
+  }
   const files = [...edited].filter(f => f !== '')
   edited = new Set()
   if (files.length > 0) {
@@ -150,13 +206,321 @@ export async function bandTurnDone($: any, e: any) {
     } finally {
       verifying = false
     }
+    if (verify) verifies = [...verifies, verify.state === 'ok' ? ('ok' as const) : verify.state === 'fail' ? ('err' as const) : ('warn' as const)].slice(-HISTORY)
   } else {
     verify = null
   }
+  await refreshSpec($) // OpenSpec 진행률: 본 에이전트 턴 끝 (턴에서 tasks.md 를 고쳤을 수 있다)
   await tick($)
 }
 
-export const register: Register = on => {
+export type TurnTokens = { fresh: number; read: number; write: number; output: number }
+/**
+ * 턴 하나의 토큰 (turn.complete 의 usage): 새 입력(input_tokens) · 캐시 읽기 · 캐시 쓰기 · 출력을 나눈다.
+ * 캐시 읽기를 입력에 더하면 값이 부푼다(949.8k 처럼). 적중률은 입력 전체 중 캐시 읽기 몫(%). usage 가 없으면 null.
+ */
+export function turnUsage(u: any): (TurnTokens & { hit: number | null }) | null {
+  if (!u || typeof u !== 'object') return null
+  const t = { fresh: Number(u.input_tokens) || 0, read: Number(u.cache_read_input_tokens) || 0, write: Number(u.cache_creation_input_tokens) || 0, output: Number(u.output_tokens) || 0 }
+  const input = t.fresh + t.read + t.write
+  return { ...t, hit: input > 0 ? (100 * t.read) / input : null }
+}
+
+/** 하위 에이전트 상태별 수 ($.agent.list()). 실행 = running·pending, 대기 = 그 밖의 살아 있는 상태, 완료 = completed, 실패 = failed·killed. */
+export function countAgents(list: { status?: string }[]): { running: number; waiting: number; done: number; failed: number } {
+  const c = { running: 0, waiting: 0, done: 0, failed: 0 }
+  for (const a of list) {
+    const s = String(a.status ?? '')
+    if (s === 'running' || s === 'pending') c.running += 1
+    else if (s === 'completed') c.done += 1
+    else if (s === 'failed' || s === 'killed') c.failed += 1
+    else c.waiting += 1
+  }
+  return c
+}
+
+/** rulegate 판정 수 (decisions.jsonl 한 줄 = 판정 하나). 막음 = deny·held, 물음 = ask·ask-shadowed, 경고 = warn. 조각 주입(inject)은 세지 않는다. */
+export function countRules(text: string): { block: number; ask: number; warn: number } {
+  const r = { block: 0, ask: 0, warn: 0 }
+  for (const line of text.split('\n')) {
+    const d = /"decision":"([a-z-]+)"/.exec(line)?.[1]
+    if (d === 'deny' || d === 'held') r.block += 1
+    else if (d === 'ask' || d === 'ask-shadowed') r.ask += 1
+    else if (d === 'warn') r.warn += 1
+  }
+  return r
+}
+
+/** 이 세션의 rulegate 판정을 읽는다. 폴더 설정이 없거나 이 세션 기록이 없으면 rules 는 null 이고 칸은 나오지 않는다. */
+async function readRules($: any) {
+  try {
+    if (!rulegateDir) {
+      rules = null
+      return
+    }
+    if (!sessionId) sessionId = await $.session.id()
+    rules = countRules(await $.fs.read(`${rulegateDir}/${sessionId}/decisions.jsonl`))
+  } catch {
+    rules = null
+  }
+}
+
+/** 띠 안쪽 폭(px): bodyColumns 와 테두리 상자의 안쪽 여백을 HOST 보정값으로 바꾼다 */
+export const innerPx = (bodyColumns: number) => bodyColumns * HOST.colPx - HOST.framePadX * 2
+
+/**
+ * 묶음 칸의 폭(px): 격자 폭(안쪽 폭 - 좌우 묶음 간격)을 n 칸과 칸 사이 묶음 간격으로 나눈다. 칸 줄은 양쪽정렬(space-between)이라
+ * 이 어림이 실제보다 조금 작아도 남는 폭은 칸 사이로만 가고 양 끝은 맞는다. 넘치지 않게 SAFETY 만큼 작게 잡는다
+ */
+const SAFETY = 8
+export const cellWidth = (bodyColumns: number, n: number) => Math.floor((innerPx(bodyColumns) - GAP.group * 2 - GAP.group * (n - 1) - SAFETY) / n)
+
+/** 묶음 칸의 열 수: 칸 4개가 최소 폭(MIN_CELL_W) 이상이면 4열 1줄, 아니면 2열 2줄 */
+export const gridCols = (bodyColumns: number) => (cellWidth(bodyColumns, 4) >= MIN_CELL_W ? 4 : 2)
+
+// 세부 단추의 글자: 짧게 두고 상태를 말한다 (긴 "세부 지표 접기" 는 띠 밖으로 넘쳤다)
+export const DETAIL_TEXT = { closed: '세부 ▾', open: '접기 ▴' } as const
+const NBSP = ' '
+export const HEAD_MIN = 200 // 탭과 한 줄일 때 머리글("세션 지표" + 값의 나이)이 들어갈 최소 폭
+export const TABS_H = HOST.buttonH // 탭 줄의 높이 (단추)
+export const TAB_GAP = GAP.item * 2 // 탭 단추 사이 8px: 칸 사이(묶음 12)보다 작다
+/** 탭 글자: 고른 탭만 "● " 를 붙인다 (색 없이도 고른 탭이 드러난다) */
+export const tabLabelsFor = (selected: number) => GROUP_NAMES.map((name, i) => (i === selected ? `● ${name}` : name))
+
+export type BarOpts = { kinds: { level: 'err' | 'warn' | 'ok'; n: number; label: string }[]; open: string; hint: string | null; handoff: boolean; detail: string }
+export type BarPlan = {
+  inner: number
+  left: number
+  right: number
+  pills: { svg: string; w: number; h: number; alt: string }[]
+  open: string
+  hint: string | null
+  handoff: boolean
+  handoffLabel: string
+  detail: string
+  band: { svg: string; w: number; hidden: number; level: number } | null
+  twoLine: boolean // 여러 줄: 첫 줄 = 고양이 + 지표 그림, 다음 줄 = (경고 칩 줄) + 배지·단추
+  chips: { svg: string; w: number } | null // 경고 칩이 첫 줄에 안 들어가 따로 한 줄로 내린 그림 (여러 줄일 때만)
+  rows: number[] // 줄마다 쓴 폭(px). 모두 inner 이하여야 한다 (배치 불변식 시험)
+}
+export const HANDOFF_TEXT = { full: '인계 ▸', short: '인계' } as const
+const CAT_W = GAP.group + 36 + GAP.item * 2 // 앞 여백 + 고양이 + 고양이 뒤 간격
+const PILLS = new Map<string, ReturnType<typeof askPillSvg>>() // 배지 그림: 종류·개수가 같으면 다시 만들지 않는다 (barPlan 이 여러 번 잰다)
+const pillOf = (level: 'err' | 'warn' | 'ok', n: number) => {
+  const key = `${level}:${n}`
+  let p = PILLS.get(key)
+  if (!p) PILLS.set(key, (p = askPillSvg(level, n)))
+  return p
+}
+/**
+ * 접힌 바의 배치(px, HOST 보정값). 시작 구역 = 고양이 + 배지 + 여는 단추, 가운데 = 지표 그림, 끝 구역 = 노력 힌트 + 인계 + 세부.
+ * 필수 세 항목(컨텍스트·주간·작업)은 어떤 폭에서도 빼지 않는다. 줄이는 순서:
+ * 1) 가운데의 덜 중요한 칸: 오늘 → 턴 → 캐시 → 검증(통과)  2) 끝 구역: 노력 힌트 → 배지 합치기 → 인계 글자 줄이기
+ * 3) 필수 세 항목 짧게(bandSvg 5~9)  4) 그래도 모자라면 두 줄: 첫 줄에 고양이와 지표, 둘째 줄에 배지와 단추.
+ */
+export function barPlan(bodyColumns: number, d: Rich, o: BarOpts): BarPlan {
+  const inner = innerPx(bodyColumns)
+  const sides = [
+    { hint: true, merge: false, short: false },
+    { hint: false, merge: false, short: false },
+    { hint: false, merge: true, short: false },
+    { hint: false, merge: true, short: true },
+  ]
+  const order = { err: 0, warn: 1, ok: 2 } as const
+  const sideOf = (s: (typeof sides)[number], withCat: boolean) => {
+    const kinds = s.merge && o.kinds.length > 1 ? [{ level: [...o.kinds].sort((p, q) => order[p.level] - order[q.level])[0]!.level, n: o.kinds.reduce((t, k) => t + k.n, 0), label: o.kinds.map(k => `${k.label} ${k.n}`).join(' · ') }] : o.kinds
+    const pills = kinds.map(k => ({ ...pillOf(k.level, k.n), alt: s.merge && o.kinds.length > 1 ? k.label : `${k.label} ${k.n}` }))
+    const hint = s.hint ? o.hint : null
+    const handoffLabel = s.short ? HANDOFF_TEXT.short : HANDOFF_TEXT.full
+    const left = (withCat ? CAT_W : GAP.group) + pills.reduce((t, p) => t + p.w + GAP.item, 0) + (o.open ? hostButtonPx(o.open) + GAP.item * 2 : 0)
+    const right = (hint ? Math.ceil(hostTextPx(hint)) + GAP.group : 0) + (o.handoff ? hostButtonPx(handoffLabel) + GAP.item * 2 : 0) + hostButtonPx(o.detail) + GAP.group
+    return { pills, hint, handoffLabel, left, right }
+  }
+  const plan = (s: ReturnType<typeof sideOf>, band: BarPlan['band'], twoLine: boolean, rows: number[], chips: BarPlan['chips'] = null): BarPlan => ({ inner, left: s.left, right: s.right, pills: s.pills, open: o.open, hint: s.hint, handoff: o.handoff, handoffLabel: s.handoffLabel, detail: o.detail, band, twoLine, chips, rows })
+  // 배치를 고를 때는 폭만 재고(measure), 고른 단계의 그림만 만든다
+  const draw = (m: { level: number }, maxW: number, part: 'all' | 'metrics' | 'chips' = 'all') => bandSvg(d, maxW, true, [m.level, m.level], part)
+  // 한 줄: (덜 중요한 칸 줄이기, 끝 구역 그대로) → (끝 구역 줄이기) → (필수 세 항목 짧게)
+  const tries: [number, [number, number]][] = [[0, [0, BAND_LEVEL.othersLast]], [1, [BAND_LEVEL.othersLast, BAND_LEVEL.othersLast]], [2, [BAND_LEVEL.othersLast, BAND_LEVEL.othersLast]], [3, [BAND_LEVEL.othersLast, BAND_LEVEL.othersLast]], [3, [BAND_LEVEL.othersLast + 1, BAND_LEVEL.last]]]
+  for (const [si, range] of tries) {
+    const s = sideOf(sides[si]!, true)
+    const room = inner - s.left - s.right - GAP.group // 가운데 그림과 끝 구역 사이도 묶음 간격 이상
+    const m = bandSvg(d, room, true, range, 'all', true)
+    if (m.fits) {
+      const band = draw(m, room)
+      return plan(s, band, false, [s.left + band.w + GAP.group + s.right])
+    }
+  }
+  // 여러 줄: 첫 줄은 고양이 + 지표 그림(빈 자리가 넓어 다시 0 단계부터), 다음 줄은 배지·단추(끝 구역도 다시 처음부터 줄인다).
+  // 경고 칩이 첫 줄에 안 들어가면 칩만 따로 한 줄로 내린다(경고 칩은 어떤 폭에서도 빼지 않는다)
+  const room1 = inner - CAT_W - GAP.group
+  const whole = bandSvg(d, room1, true, [0, BAND_LEVEL.last], 'all', true)
+  const band = whole.fits ? draw(whole, room1) : draw(bandSvg(d, room1, true, [0, BAND_LEVEL.last], 'metrics', true), room1, 'metrics')
+  const chipM = whole.fits ? null : bandSvg(d, inner - GAP.group * 2, true, [0, BAND_LEVEL.last], 'chips', true)
+  const chipRow = chipM && chipM.w > GAP.group + SPACE_MIN ? draw(chipM, inner - GAP.group * 2, 'chips') : null
+  const chips = chipRow ? { svg: chipRow.svg, w: chipRow.w } : null
+  for (const si of [0, 1, 2, 3]) {
+    const s = sideOf(sides[si]!, false)
+    if (s.left + s.right <= inner || si === 3) return plan(s, band, true, [CAT_W + band.w + GAP.group, ...(chips ? [GAP.group + chips.w + GAP.group] : []), s.left + s.right], chips)
+  }
+  throw new Error('unreachable')
+}
+const SPACE_MIN = 8 // 칩이 하나도 없을 때의 빈 그림 폭(앞 여백 12 + 뒤 8) 을 넘어야 칩 줄을 만든다
+
+/** 펼친 줄 수(Edit·MultiEdit 는 바꾼 글의 줄, Write 는 쓴 줄). 늘어난 줄 = 새 글, 줄어든 줄 = 옛 글 (근사: 같은 줄을 다시 쓰면 둘 다 센다) */
+export function editLines(tool: string, input: any): { added: number; removed: number } {
+  const lines = (s: unknown) => (typeof s === 'string' && s !== '' ? s.split('\n').length : 0)
+  if (tool === 'Write') return { added: lines(input?.content), removed: 0 }
+  const list: any[] = tool === 'MultiEdit' ? (Array.isArray(input?.edits) ? input.edits : []) : [input]
+  return list.reduce((n, x) => ({ added: n.added + lines(x?.new_string), removed: n.removed + lines(x?.old_string) }), { added: 0, removed: 0 })
+}
+
+/**
+ * 주간 한도의 리셋 때 예상(%): 이번 주에 지금까지 쓴 속도로 리셋까지 이어 긋는다(추정, 화면에 "약").
+ * 주의 시작 = 리셋 - 7일. 지난 시간이 12시간 미만이면 흔들려서 내지 않는다. 100 을 넘으면 100 이 아니라 그대로 보인다(넘침을 말한다).
+ */
+export function weekProjection(percent: number, resetMs: number, now: number): number | null {
+  if (!Number.isFinite(resetMs)) return null
+  const elapsed = now - (resetMs - 7 * DAY)
+  if (elapsed < DAY / 2 || resetMs <= now) return null
+  return Math.round((percent * 7 * DAY) / elapsed)
+}
+
+export type SpecState = { changes: { name: string; done: number; total: number }[]; branch: string | null; root: string }
+/** tasks.md 한 개의 체크 수: `- [x]`(또는 `* [X]`) 는 끝남, `- [ ]` 는 남음. 들여쓴 하위 항목도 센다 */
+export function countTasks(text: string): { done: number; total: number } {
+  const done = text.match(/^\s*[-*] \[[xX]\]/gm)?.length ?? 0
+  return { done, total: done + (text.match(/^\s*[-*] \[ \]/gm)?.length ?? 0) }
+}
+/** git 브랜치 이름: .git/HEAD 의 "ref: refs/heads/x". worktree 는 .git 파일의 "gitdir: <경로>" 를 따라간다. 모르면 null */
+async function branchOf($: any, root: string): Promise<string | null> {
+  const head = async (gitDir: string) => /^ref: refs\/heads\/(.+)$/m.exec(await $.fs.read(`${gitDir}/HEAD`))?.[1]?.trim() ?? null
+  try {
+    return await head(`${root}/.git`)
+  } catch {
+    try {
+      const dir = /^gitdir: (.+)$/m.exec(await $.fs.read(`${root}/.git`))?.[1]?.trim()
+      return dir ? await head(dir) : null
+    } catch {
+      return null
+    }
+  }
+}
+/**
+ * 진행 중인 OpenSpec change 들을 읽는다. tasks.md 에 체크 항목이 하나도 없으면 그 change 는 뺀다. change 가 없으면 spec = null:
+ * 접힌 바의 "작업" 은 숨기고, 세부 칸에는 이유를 쓴다(specEmpty): 폴더에 OpenSpec 이 없는지, 진행 중 change 가 없는지
+ * (숨김이 "기능이 사라졌다" 로 보이지 않게)
+ */
+export async function refreshSpec($: any): Promise<SpecState | null> {
+  await readSpec($)
+  return spec
+}
+/** spec 이 null 인 이유 (세부 칸 근거) */
+export const specEmptyReason = () => specEmpty
+let specEmpty = '아직 값 없음'
+async function readSpec($: any): Promise<void> {
+  try {
+    const root = String(await $.session.cwd()).replace(/\\/g, '/')
+    const dir = `${root}/openspec/changes`
+    const changes: SpecState['changes'] = []
+    const entries: any[] | null = await $.fs.list(dir).catch(() => null)
+    specEmpty = entries === null ? `이 폴더에 OpenSpec 없음 (${root})` : '진행 중 change 없음'
+    for (const entry of entries ?? []) {
+      if (entry.kind !== 'dir' || entry.name === 'archive') continue
+      const file = `${dir}/${entry.name}/tasks.md`
+      const size = await $.fs.stat(file).then((s: any) => Number(s?.size ?? 0)).catch(() => -1)
+      if (size < 0 || size > SPEC_MAX_BYTES) continue
+      const c = countTasks(await $.fs.read(file).catch(() => ''))
+      if (c.total > 0) changes.push({ name: entry.name, ...c })
+    }
+    spec = changes.length > 0 ? { changes: changes.sort((p, q) => p.name.localeCompare(q.name)), branch: await branchOf($, root), root } : null
+  } catch {
+    spec = null
+    specEmpty = 'OpenSpec 을 읽지 못함'
+  }
+}
+
+// 아래 셋은 register.ts 의 훅이 부른다: 한 모드에는 matcher 없는 같은 이벤트 훅을 하나만 둘 수 있다 (엔진 규칙)
+/** 작업 묶음: 도구 호출 하나가 끝났다(하위 에이전트 포함). 이름·실패·거부, 편집한 파일과 줄 수를 센다 */
+export function bandToolDone(e: any, ran: any) {
+  const name = String(e?.tool ?? '')
+  tools.calls += 1
+  tools.by[name] = (tools.by[name] ?? 0) + 1
+  if (ran?.deny !== undefined) tools.denies += 1
+  else if (ran?.isError === true) tools.errors += 1
+  else if (name === 'Edit' || name === 'Write' || name === 'MultiEdit') {
+    const l = editLines(name, e)
+    edits.files.add(String(e?.file_path ?? ''))
+    edits.added += l.added
+    edits.removed += l.removed
+  }
+}
+/** 품질 묶음: 사용자에게 승인을 물은 도구 호출 (tool.check 결정 ask). 승인이 끝난 때를 알리는 이벤트가 없어 대기 시간은 재지 않는다 */
+export function bandToolCheck(result: any) {
+  if (result?.decision === 'ask') asked += 1
+}
+/** 작업 묶음: 하위 에이전트의 턴이 끝났다. 쓴 토큰(새 입력 + 캐시 쓰기 + 출력)을 더한다 */
+export function bandSubTurn(e: any) {
+  const u = turnUsage(e?.usage)
+  if (u) subTokens += u.fresh + u.write + u.output
+}
+
+/** "세부 ▾" 단추: 펼치면 그 순간에만 칸이 들어오는 움직임을 주고, 펼친 동안 쓰는 값(판정 수, 턴 수)을 곧바로 읽는다. */
+function toggleDetail($: any) {
+  showDetail = !showDetail
+  animateNext = showDetail
+  $.ui.invalidate('ui.render')
+  if (showDetail) void tick($)
+}
+
+// ---- 보정 화면: 실제 앱의 px 를 한 장의 스크린샷으로 잰다 (/session_board 보정 으로 켜고 끈다) ----
+// 눈금 그림(px)과 알려진 부품(간격 1, 안쪽 여백 1, 테두리 상자, 너비 10·높이 3 상자, 단추, 글자)을 같은 왼쪽 끝에서 나란히 그린다.
+// 스크린샷의 눈금이 배율을 주므로 화면 배율과 상관없이 CSS px 로 읽힌다. 읽은 값은 tokens.ts 의 HOST 에 둔다
+let calibrating = false
+export function toggleCalibrate($: any): boolean {
+  calibrating = !calibrating
+  $.ui.invalidate('ui.render')
+  return calibrating
+}
+const RULER_W = 640
+const rulerSvg = () => {
+  let s = `<rect width="${RULER_W}" height="30" fill="#000"/>`
+  for (let x = 0; x <= RULER_W; x += 10) {
+    const h = x % 100 === 0 ? 14 : x % 50 === 0 ? 10 : 5
+    s += `<rect x="${x === RULER_W ? x - 1 : x}" y="0" width="1" height="${h}" fill="#fff"/>`
+    if (x % 50 === 0 && x < RULER_W) s += `<text x="${x + 2}" y="26" font-size="10" fill="#fff" font-family="Consolas,monospace">${x}</text>`
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RULER_W}" height="30">${s}</svg>`
+}
+const markerSvg = (fill: string) => `<svg xmlns="http://www.w3.org/2000/svg" width="4" height="16"><rect width="4" height="16" fill="${fill}"/></svg>`
+function calibrationRows(cols: number, props: any, Box: any, Text: any, Button: any, Svg: any, sp: (w: number, k: string) => any): any[] {
+  const mark = (k: string, fill = '#ff4d4d') => Svg({ key: k, source: markerSvg(fill), alt: '보정 표지', width: 4, height: 16 })
+  const label = (k: string, t: string) => Text({ key: k, dimColor: true, children: t })
+  return [
+    Box({ key: 'cal0', children: [label('t', `보정 화면 · bodyColumns ${cols} · maxRows ${props.maxRows ?? '?'} · HOST measured ${HOST.measured} · 끄기: /session_board 보정`)] }),
+    Box({ key: 'cal1', children: [Svg({ key: 'r', source: rulerSvg(), alt: '보정 눈금 640px', width: RULER_W, height: 30 })] }),
+    Box({ key: 'cal2', flexDirection: 'row', children: [mark('a'), mark('b', '#4dd2ff'), sp(40, 's'), label('t', '① 간격 없음')] }),
+    Box({ key: 'cal3', flexDirection: 'row', gap: 1, children: [mark('a'), mark('b', '#4dd2ff'), label('t', '② gap 1')] }),
+    Box({ key: 'cal4', flexDirection: 'row', children: [Box({ key: 'p', paddingLeft: 1, children: [mark('a')] }), sp(40, 's'), label('t', '③ paddingLeft 1')] }),
+    Box({ key: 'cal5', flexDirection: 'row', children: [Box({ key: 'b', borderStyle: 'round', borderColor: '#ffffff', children: [mark('a')] }), sp(40, 's'), label('t', '④ 테두리 상자')] }),
+    Box({ key: 'cal6', flexDirection: 'row', children: [Box({ key: 'w', width: 10, height: 3, backgroundColor: '#4dd2ff' }), sp(40, 's'), label('t', '⑤ width 10 · height 3')] }),
+    Box({ key: 'cal7', flexDirection: 'row', alignItems: 'center', children: [Button({ key: 'cb1', label: '보정 단추 1', variant: 'primary', children: [Text({ key: 't', children: DETAIL_TEXT.closed })], onPress: () => undefined }), sp(24, 's1'), Button({ key: 'cb2', label: 'ABCDEFGHIJ', variant: 'secondary', onPress: () => undefined }), sp(24, 's2'), Button({ key: 'cb3', label: '가나다라마바사아자차', variant: 'secondary', onPress: () => undefined }), sp(24, 's3'), label('t', '⑥ 단추')] }),
+    Box({ key: 'cal8', flexDirection: 'row', children: [Text({ key: 'a', children: 'ABCDEFGHIJ' }), sp(24, 's1'), Text({ key: 'b', children: '가나다라마바사아자차' }), sp(24, 's2'), label('t', '⑦ 글자')] }),
+    // ⑧ 줄 바꿈 없는 공백 10자의 폭 (앱 부품 사이 간격을 이 글자로 만든다). ⑥ 첫 단추는 label 과 Text 자식 중 무엇이 그려지는지도 보인다
+    Box({ key: 'cal9', flexDirection: 'row', children: [mark('a'), Text({ key: 'n', children: ' '.repeat(10) }), mark('b', '#4dd2ff'), Text({ key: 's', children: '   ' }), label('t', '⑧ 공백(NBSP) 10자')] }),
+  ]
+}
+
+/** 묶음 탭: 고른 묶음의 칸이 차례로 들어온다(한 번) */
+function selectGroup($: any, i: number) {
+  if (i === panelGroup) return
+  panelGroup = i
+  animateNext = true
+  $.ui.invalidate('ui.render')
+}
+
+export const register: Register = (on, options) => {
+  // rulegate 판정 폴더(선택). 비어 있으면 격자에 rulegate 칸이 나오지 않는다
+  rulegateDir = String(options?.rulegateStateDir ?? '').trim().replace(/[\\/]+$/, '')
   on('session.measure', async ($, e, next) => {
     applyUsage(e)
     await trackDay($)
@@ -164,11 +528,14 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 지금 노력 수준. 사용자가 바꾸면 다음 요청부터 바뀐 값이 온다
+  // 지금 노력 수준·모델. 사용자가 바꾸면 다음 요청부터 바뀐 값이 온다
   on('turn.step', async function* ($, e, next) {
-    if ((e as any).agentId === undefined && typeof e.effort === 'string' && e.effort !== effortNow) {
-      effortNow = e.effort
-      $.ui.invalidate('ui.render')
+    if ((e as any).agentId === undefined) {
+      if (typeof (e as any).model === 'string') modelNow = String((e as any).model).replace(/^claude-/, '')
+      if (typeof e.effort === 'string' && e.effort !== effortNow) {
+        effortNow = e.effort
+        $.ui.invalidate('ui.render')
+      }
     }
     return yield* next(e)
   })
@@ -181,6 +548,18 @@ export const register: Register = on => {
     })
   }
 
+  // 한도 묶음: 압축 횟수 (본 에이전트, 자동·수동)
+  on('session.compact', async ($, e, next) => {
+    const r = await next(e)
+    // 자동 = trigger auto, 수동 = 사람(/compact)이나 플러그인이 시킨 것. precompute(미리 계산)와 건너뛴 압축(skip)은 세지 않는다
+    if ((e as any).agentId === undefined && (e as any).trigger !== 'precompute' && (r as any)?.skip === undefined) {
+      if ((e as any).trigger === 'auto') compacts.auto += 1
+      else compacts.manual += 1
+    }
+    return r
+  })
+
+
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const props: any = (e as any).props ?? {}
     if (props.hasSurvey) return next(e)
@@ -192,61 +571,109 @@ export const register: Register = on => {
     const { Box, Text, Button, Svg } = $.ui.resolve(e) as any
     // 데스크톱 화면에서는 ponytail 의 버튼이 안쪽 여백을 두껍게 그려서 그 줄이 오른쪽으로 밀린다. 같은 만큼 들여쓴다.
     const indent = (e as any).surface === 'desktop' ? INDENT : 0
-    // 그림을 그릴 수 있는 화면(데스크톱)은 시안 3번대로 그린다: 흰 카드 안에 밴드 이미지, 오른쪽 끝에 "상세" 버튼, 펼치면 2×2 카드 이미지.
+    // 그림을 그릴 수 있는 화면(데스크톱): 한 줄(고양이 · 배지 · 컨텍스트 · 주간 · 세부 단추), 펼치면 지표 격자 그림
     if (typeof Svg === 'function' && (e as any).surface !== 'terminal') {
       const d = richData(Date.now(), props.isWorking === true)
       // 고양이는 띠 그림에서 떼어 따로 그리고, 그 바로 옆에 누를 수 있는 개수 단추를 둔다 (2026-11-16 사용자 요청: 고양이 옆에 알림 숫자)
-      const kinds = ASK_KINDS.filter(k => asks[k.key] > 0)
-      const hint = effortHint(effortNeed, effortNow)
-      const handoffShown = showHandoff()
-      const extraW = (hint ? tw(hint, 13) + 16 : 0) + (handoffShown ? 70 : 0)
-      const band = bandSvg(d, Math.max(200, cols * 8 - 140 - indent * 16 - 40 - kinds.length * 45 - (kinds.length > 0 ? 20 : 0) - extraW), true)
-      // 앱이 단추 안 글자색을 지운다. 그래서 색 점은 단추 밖의 글자로 둔다
-      const askButtons = kinds.map(k => {
-        // 띠가 길어지지 않게 글자(결재·알림·확인) 없이 색 점과 숫자만 쓴다. 뜻은 색이 말한다 (2026-11-16 사용자 요청). 고양이와 붙지 않게 왼쪽을 띄운다
-        // 알약은 띠와 같은 그림으로 그린다. 단추는 글자만 담고 앱이 그 색을 지워서, 그림 알약 옆에 작은 "▸" 단추를 따로 둔다
-        const pill = askPillSvg(k.level, asks[k.key])
-        return Box({
-          key: `ask-${k.key}`,
-          flexShrink: 0,
-          alignItems: 'center',
-          paddingLeft: 1,
-          children: [Svg({ key: 'p', source: pill.svg, alt: `${k.label} ${asks[k.key]}`, width: pill.w, height: pill.h })],
-        })
+      // 접힌 띠 = 툴바 한 줄: 시작(고양이·배지) · 가운데(지표 그림) · 끝(노력 힌트·인계·세부). 폭은 barPlan 이 HOST 보정값으로 정한다:
+      // 끝 구역의 실제 폭을 먼저 잡고 남는 폭을 가운데 그림에 준다 (어림 숫자로 잡으면 단추가 띠 밖으로 넘친다)
+      const plan = barPlan(cols - indent * 2, d, {
+        kinds: ASK_KINDS.filter(k => asks[k.key] > 0).map(k => ({ level: k.level, n: asks[k.key], label: k.label })),
+        open: ASK_KINDS.some(k => asks[k.key] > 0) ? '▸' : isBoardClosed() ? '세션 ▸' : '',
+        hint: effortHint(effortNeed, effortNow),
+        handoff: showHandoff(),
+        detail: showDetail ? DETAIL_TEXT.open : DETAIL_TEXT.closed,
       })
-      // 알약이 여러 개여도 여는 단추는 하나다. 한 글자 plain 단추는 글자 자체가 단추로 그려진다
-      // 기다리는 칸이 없어도 패널이 닫혀 있으면 같은 자리에 "세션 ▸" 를 둔다: 띠 위에 따로 줄을 만들지 않는다 (2026-11-16 사용자 보고)
-      const openLabel = kinds.length > 0 ? '▸' : isBoardClosed() ? '세션 ▸' : ''
-      const openButton = openLabel !== '' ? Box({ key: 'ask-open', flexShrink: 0, alignItems: 'center', paddingLeft: kinds.length > 0 ? 0 : 1, children: [Button({ key: kinds.length > 0 ? 'open-asks' : 'open-board', label: openLabel, plain: true, dimColor: true, onPress: () => openBoard($) })] }) : null
-      const alt = [d.context && `컨텍스트 ${d.context.percent}%`, d.week && `주간 ${Math.round(d.week.percent)}%`, d.turn && `턴 ${d.turn.text}`, `하위 ${d.children}`].filter(Boolean).join(', ')
+      // 앱 부품 사이 간격은 줄 바꿈 없는 공백(NBSP) 글자로 둔다. 앱의 gap·padding 1 은 px 가 정해져 있지 않고(실제 화면에서 확인),
+      // 대체 글이 빈 투명 그림은 실제 앱에서 그려지지 않았다(탭·단추가 딱 붙음). 글자는 앱이 늘 그린다
+      const sp = (w: number, key: string) => Text({ key, children: NBSP.repeat(Math.max(1, Math.round(w / HOST.nbspPx))) })
+      const fixed = (key: string, child: any) => Box({ key, flexShrink: 0, alignItems: 'center', children: [child] })
+      const alt = [d.context && `컨텍스트 ${d.context.percent}%`, d.week && `주간 ${Math.round(d.week.percent)}%`, ...bandStats(d).map(s => s.runs.map(r => r.t).join(''))].filter(Boolean).join(', ')
+      // 테두리·바탕: 접혀 있으면 바가, 펼치면 바와 격자를 함께 담은 바깥 상자가 갖는다
+      const FRAME = { backgroundColor: color('background-surface'), borderStyle: 'round', borderColor: color('border-strong') } // 어두운 앱 바탕 위에서도 띠 가장자리가 보이게 표면과 3:1 이상인 테두리
+      const cat = [sp(GAP.group, 's0'), fixed('catb', Svg({ key: 'cat', source: bandCatSvg(d.mood ?? 'zz'), alt: '고양이', width: 36, height: 36 })), sp(GAP.item * 2, 's1')]
+      // 지표 값이 하나도 없으면(세션 시작 직후) 가운데 그림을 넣지 않는다: 빈 그림과 빈 대체 글은 실제 앱이 그리지 않는다
+      const metrics = plan.band && alt ? [fixed('bandb', Svg({ key: 'band', source: plan.band.svg, alt, ...sizeOf(plan.band.svg) }))] : []
+      const start = [
+        // 배지: 기호 + 숫자 그림 알약 (앱이 단추 안 글자색을 지워서 단추 밖 그림으로 둔다). 좁으면 한 알약으로 합친다
+        ...plan.pills.flatMap((p, i) => [fixed(`ask-${i}`, Svg({ key: 'p', source: p.svg, alt: p.alt, width: p.w, height: p.h })), sp(GAP.item, `sp${i}`)]),
+        ...(plan.open ? [fixed('ask-open', Button({ key: plan.pills.length > 0 ? 'open-asks' : 'open-board', label: plan.open, plain: true, dimColor: true, onPress: () => openBoard($) })), sp(GAP.item * 2, 's2')] : []),
+      ]
+      const end = [
+        Box({ key: 'fill', flexGrow: 1 }),
+        ...(plan.hint ? [fixed('effortb', Text({ key: 'effort', color: 'warning', bold: true, children: plan.hint })), sp(GAP.group, 's3')] : []),
+        ...(plan.handoff ? [fixed('handoffb', Button({ key: 'handoff', label: plan.handoffLabel, variant: 'secondary', onPress: () => sendHandoff($) })), sp(GAP.item * 2, 's4')] : []),
+        // 띠의 주요 동작 하나. 실제 앱은 label 을 글자로 그리므로(Text 자식이 아니라 label 의 "세부 지표 접기" 가 보였다) label 을 짧게 둔다.
+        // "세부 ▾" / "접기 ▴" 글자가 펼침 상태를 말한다 (앱 단추에는 aria-expanded 가 없다)
+        fixed('detailb', Button({ key: 'detail', label: plan.detail, variant: 'primary', onPress: () => toggleDetail($) })),
+        sp(GAP.group, 's5'),
+      ]
+      // 한 줄로 안 되면 두 줄: 첫 줄에 고양이와 필수 지표, 둘째 줄에 배지와 단추 (필수 세 항목을 빼지 않으려고)
       const row = Box({
         key: 'rb',
-        alignItems: 'center',
-        backgroundColor: B.white,
-        borderStyle: 'round',
-        borderColor: B.line,
-        children: [
-          // 폭 계산이 실제 화면보다 넓게 나와도 "상세" 단추가 밀려나지 않게: 그림 칸만 줄어들고 단추 칸은 줄지 않는다
-          Box({ key: 'catb', flexShrink: 0, paddingLeft: 1, children: [Svg({ key: 'cat', source: bandCatSvg(d.mood ?? 'zz'), alt: '고양이', width: 36, height: 36 })] }),
-          ...askButtons,
-          openButton,
-          Box({ key: 'bandb', flexShrink: 1, minWidth: 0, children: [Svg({ key: 'band', source: band.svg, alt, ...sizeOf(band.svg) })] }),
-          Box({ key: 'fill', flexGrow: 1 }),
-          hint ? Box({ key: 'effortb', flexShrink: 0, alignItems: 'center', paddingRight: 1, children: [Text({ key: 'effort', color: 'warning', bold: true, children: hint })] }) : null,
-          handoffShown ? Box({ key: 'handoffb', flexShrink: 0, paddingRight: 1, children: [Button({ key: 'handoff', label: '인계 ▸', variant: 'secondary', onPress: () => sendHandoff($) })] }) : null,
-          Box({ key: 'detailb', flexShrink: 0, children: [Button({ key: 'detail', label: `상세 ${showDetail ? '▴' : '▾'}`, variant: 'secondary', onPress: () => { showDetail = !showDetail; $.ui.invalidate('ui.render') } })] }),
-        ],
+        ...(plan.twoLine ? { flexDirection: 'column' } : { alignItems: 'center' }),
+        ...(showDetail ? { backgroundColor: color('background-surface') } : FRAME),
+        children: plan.twoLine
+          ? [
+              Box({ key: 'rb1', alignItems: 'center', children: [...cat, ...metrics] }),
+              ...(plan.chips ? [Box({ key: 'rbc', alignItems: 'center', children: [sp(GAP.group, 's0c'), fixed('chipsb', Svg({ key: 'chips', source: plan.chips.svg, alt: bandStats(d).filter(s => s.chip).map(s => s.runs.map(r => r.t).join('')).join(', '), ...sizeOf(plan.chips.svg) }))] })] : []),
+              Box({ key: 'rb2', alignItems: 'center', children: [sp(GAP.group, 's0b'), ...start, ...end] }),
+            ]
+          : [...cat, ...start, ...metrics, ...end],
       })
-      const panel = showDetail ? panelSvg(d) : null
-      // 크기를 안 주면 넓은 패널에서 이미지가 폭에 맞춰 커진다. 원래 폭(800)을 넘지 않게, 좁으면 화면 폭에 맞춰 비율대로 줄인다
-      const panelW = panel ? Math.min(panel.w, Math.max(320, cols * 8 - 24 - indent * 16)) : 0
+      // 펼친 지표 격자: 바와 한 상자(테두리 하나)에 담아 높이를 아낀다(아래가 살짝 잘렸다). 줄마다 같은 열 격자:
+      // 칸 상자 폭 = 100% / 열 수 라서 마지막 줄도 앞줄의 열에 맞는다. 칸 그림은 고정 크기(글자를 늘이거나 줄이지 않는다)
+      const animate = animateNext
+      animateNext = false
+      const n = gridCols(cols - indent * 2)
+      const pic = (p: Pic) => Svg({ source: p.svg, alt: p.alt, width: p.w, height: p.h })
+      // 펼친 격자의 간격 (composition 세 단계, 모두 그림 px): 바 ↔ 머리글 = 구역(머리글 그림 위 여백), 머리글 ↔ 탭 = 묶음(머리글 그림 아래 여백),
+      // 탭 ↔ 칸 = 묶음(칸 그림 위 여백), 칸 안 줄 사이 = 항목. 좌우 안쪽 여백도 묶음 간격의 투명 그림이다
+      const padded = (key: string, child: any) => Box({ key: `${key}w`, flexDirection: 'row', children: [sp(GAP.group, `${key}l`), Box({ key: `${key}c`, flexGrow: 1, flexDirection: 'column', children: [child] }), sp(GAP.group, `${key}r`)] })
+      // 묶음 탭: 떨어진 secondary 단추 5개, 사이는 묶음보다 작은 8px(NBSP). 고른 탭은 "● " 표시와 밝은 글자,
+      // 나머지는 dimColor(흐린 글자). 앱 단추에는 색·선택 옵션이 없어 primary 채움 대신 이 둘로 구분한다. dimColor 가 데스크톱에서
+      // 흐리게 그려지지 않아도 "● " 하나로 고른 탭이 드러난다. 키보드: Tab 이동, Enter 선택
+      // 탭은 "세션 지표" 머리글과 한 줄, 오른쪽 끝. 머리글 자리가 HEAD_MIN 보다 작으면 다음 줄에 둔다
+      const tabLabels = tabLabelsFor(panelGroup)
+      const tabsW = tabLabels.reduce((t, label) => t + hostButtonPx(label), 0) + TAB_GAP * (tabLabels.length - 1)
+      const headRoom = plan.inner - GAP.group * 3 - tabsW // 좌우 안쪽 여백 + 머리글 ↔ 탭 묶음 간격
+      const inlineTabs = headRoom >= HEAD_MIN
+      const tabs = Box({
+        key: 'pt',
+        flexDirection: 'row',
+        alignItems: 'center',
+        alignSelf: inlineTabs ? 'flex-end' : 'flex-start',
+        children: tabLabels.flatMap((label, i) => [...(i > 0 ? [sp(TAB_GAP, `tg${i}`)] : []), Button({ key: `g${i}`, label, variant: 'secondary', dimColor: i !== panelGroup, onPress: () => selectGroup($, i) })]),
+      })
+      const pics = showDetail ? panelPics(d, animate, panelGroup, cellWidth(cols - indent * 2, n)) : []
+      const panelBox = showDetail
+        ? Box({
+            key: 'pb',
+            flexDirection: 'column',
+            children: [
+              // 머리글은 남는 폭에 맞춰 덜 중요한 항목부터 뺀다
+              ...(inlineTabs
+                ? [padded('ph', Box({ key: 'phr', flexDirection: 'row', alignItems: 'flex-end', children: [pic(panelHead(d, headRoom, TABS_H, 0)), Box({ key: 'pfill', flexGrow: 1 }), tabs] }))]
+                : [padded('ph', pic(panelHead(d, plan.inner - GAP.group * 2))), padded('pt', tabs)]),
+              padded(
+                'pg',
+                Box({
+                  key: 'pg',
+                  flexDirection: 'column',
+                  // 양쪽정렬: 첫 칸은 왼쪽 끝, 마지막 칸은 오른쪽 끝, 사이는 같은 간격 (모든 줄이 칸 n 개라 열도 맞는다)
+                  children: Array.from({ length: Math.ceil(pics.length / n) }, (_, r) =>
+                    Box({ key: `r${r}`, flexDirection: 'row', justifyContent: 'space-between', children: pics.slice(r * n, r * n + n).map((p, i) => Box({ key: `c${panelGroup}-${r * n + i}`, flexShrink: 0, children: [pic(p)] })) }),
+                  ),
+                }),
+              ),
+            ],
+          })
+        : null
       const mineRich = Box({
         key: 'relay',
         flexDirection: 'column',
-        gap: 0, // 밴드와 상세 카드 사이 빈 줄을 없애 채팅창 위 막대가 스크롤 없이 들어오게 한다
-        paddingLeft: indent,
-        paddingRight: indent,
-        children: [row, panel ? Svg({ key: 'panel', source: panel.svg, alt: `상세: ${alt}`, width: panelW, height: Math.round((panel.h * panelW) / panel.w) }) : null],
+        ...(showDetail ? { ...FRAME, overflow: 'hidden' } : {}),
+        children: [...(calibrating ? calibrationRows(cols, props, Box, Text, Button, Svg, sp) : []), row, panelBox],
       })
       return beneath ? Box({ flexDirection: 'column', children: [Box({ key: 'beneath', flexDirection: 'column', children: [beneath] }), mineRich] }) : mineRich
     }
@@ -277,20 +704,9 @@ export const register: Register = on => {
       const hint = effortHint(effortNeed, effortNow)
       if (hint) children.push(Text({ key: `${key}effort`, color: 'warning', bold: true, children: `${hint} ` }))
       if (showHandoff()) children.push(Button({ key: `${key}handoff`, label: '인계 ▸', plain: true, dimColor: true, onPress: () => sendHandoff($) }))
-      // 터미널: 패널이 닫혀 있으면 상세 앞에 여는 단추를 둔다
+      // 터미널: 패널이 닫혀 있으면 세부 앞에 여는 단추를 둔다
       if (isBoardClosed()) children.push(Button({ key: 'open-board', label: '세션 ▸', plain: true, dimColor: true, onPress: () => openBoard($) }))
-      children.push(
-        Button({
-          key: `${key}detail`,
-          label: `상세 ${showDetail ? '▴' : '▾'}`,
-          plain: true,
-          dimColor: true,
-          onPress: () => {
-            showDetail = !showDetail
-            $.ui.invalidate('ui.render')
-          },
-        }),
-      )
+      children.push(Button({ key: `${key}detail`, label: `세부 ${showDetail ? '▴' : '▾'}`, plain: true, dimColor: true, onPress: () => toggleDetail($) }))
       return Box({ key, children })
     }
     const shown = SHOW_COST ? segs : segs.filter(s => s.prio !== 6)
@@ -322,10 +738,22 @@ async function tick($: any) {
   try {
     const list: any[] = await $.agent.list()
     children = list.filter(a => a.status === 'running').length
+    agentCounts = countAgents(list)
   } catch {
     // 목록을 못 읽으면 이전 값을 둔다
   }
   asks = askCounter() // 세션 보드가 메모리에 가진 개수를 받는다
+  specTicks += 1
+  if (specTicks % SPEC_EVERY === 0) await refreshSpec($) // OpenSpec 진행률: 30초마다
+  // 펼친 동안만 읽는 값: rulegate 판정 수(파일), 턴 수
+  if (showDetail) {
+    await readRules($)
+    try {
+      turnCount = await $.session.turns()
+    } catch {
+      // 턴 수를 못 읽으면 머리글에서 뺀다
+    }
+  }
   $.ui.invalidate('ui.render')
 }
 
@@ -343,10 +771,13 @@ function applyUsage(u: any) {
     context = { tokens, window: c.window, percent: Math.round(c.percent ?? (tokens / c.window) * 100) }
   }
   if (u?.cost) costUsd = u.cost.usd
+  if (typeof u?.startedAt === 'number') startedAt = u.startedAt
   const limits: any[] = u?.rateLimits ?? []
   limitKinds = limits.map(r => String(r.kind))
   const w = limits.find(r => r.kind === 'seven_day') ?? limits.find(r => String(r.kind).startsWith('seven_day'))
   if (w) week = { percent: w.percentUsed, resetsAt: w.resetsAt }
+  const f = limits.find(r => r.kind === 'five_hour') ?? limits.find(r => String(r.kind).startsWith('five_hour'))
+  if (f) five = { percent: f.percentUsed, resetsAt: f.resetsAt }
 }
 
 // 오늘 시작 때의 주간 %를 저장해 두고, 현재 값에서 빼서 "오늘 쓴 양"을 계산한다.
@@ -450,7 +881,7 @@ export function barsOf(h: number[]): string {
   return h.map(p => BARS[Math.max(1, Math.min(BARS.length - 1, Math.floor((p / 100) * BARS.length)))]).join('')
 }
 
-/** "상세 ▾" 를 펼쳤을 때 보이는 근거. 값을 못 읽은 항목은 줄을 만들지 않는다. */
+/** 터미널에서 "세부 ▾" 를 펼쳤을 때 보이는 근거. 값을 못 읽은 항목은 줄을 만들지 않는다. */
 export function detailRows(now: number): [string, string][] {
   const rows: [string, string][] = []
   const when = (ms: number) => {
@@ -468,6 +899,15 @@ export function detailRows(now: number): [string, string][] {
   const turn = join([lastTurnSec !== null && `마지막 턴 ${fmtDur(lastTurnSec * 1000)}`, lastAnswerAt > 0 && `캐시 만료 ${when(lastAnswerAt + CACHE_MINUTES * 60_000)}`])
   if (turn) rows.push(['턴·캐시', turn])
   rows.push(['상태', join([`검증 ${verify ? verify.text : '없음'}`, `하위 ${children}개 실행 중`])])
+  // 터미널에도 데스크톱 격자와 같은 원천의 항목을 글자로 둔다
+  const fr = five?.resetsAt ? Date.parse(five.resetsAt) : NaN
+  if (five) rows.push(['5시간', join([`${Math.round(five.percent)}%`, Number.isFinite(fr) && `${when(fr)} 리셋`])])
+  const hit = hits.at(-1)
+  const tok = turnTokens.at(-1)
+  if (hit !== undefined || tok) rows.push(['캐시·토큰', join([hit !== undefined && `적중 ${Math.round(hit)}%`, tok !== undefined && `새 ${commaN(tok.fresh)} · 읽기 ${commaN(tok.read)} · 쓰기 ${commaN(tok.write)} · 출 ${commaN(tok.output)}`])])
+  if (agentCounts) rows.push(['하위', `실행 ${agentCounts.running} · 대기 ${agentCounts.waiting} · 완료 ${agentCounts.done} · 실패 ${agentCounts.failed}`])
+  if (rules) rows.push(['rulegate', `막음 ${rules.block} · 물음 ${rules.ask} · 경고 ${rules.warn}`])
+  if (tools.calls > 0) rows.push(['작업', `도구 ${tools.calls}회 (실패 ${tools.errors} · 거부 ${tools.denies}) · 편집 ${edits.files.size}파일 +${edits.added} −${edits.removed}줄 · 권한 질문 ${asked} · 압축 ${compacts.auto + compacts.manual}`])
   if (history.length > 0) rows.push(['범례', '☀ 25% 미만 · ☁ 50% · ☂ 75% · ☇ 90% · ↯ 그 이상 (컨텍스트 사용률)'])
   return rows
 }
@@ -494,213 +934,16 @@ export function fit(segs: Seg[], cols: number): Seg[] {
   return kept.sort((a, b) => a.prio - b.prio)
 }
 
-// ---- 데스크톱 밴드: my-own-mods UI UX 리디자인.html 의 3번(상태 밴드와 상세 패널, 화이트) 수치대로 그린다 ----
-// 접힌 밴드와 펼친 2×2 카드는 Svg 이미지다. 색·치수는 이 블록에서만 쓴다(규칙 2).
-// 시안과 다른 점(규칙 23): 글꼴은 맑은 고딕·Consolas 로 대체, 카드 그림자·글로우는 이미지 밖이라 없음,
-// 주간 막대의 권장 눈금은 "오늘 시작 값 + 오늘 권장" 위치(시안은 권장량 숫자 그대로의 위치라 오해를 부른다).
-type Tone = 'ok' | 'info' | 'warn' | 'err' | 'mute'
-type Rich = {
-  verify: { tone: Tone; text: string } | null
-  children: number
-  context: { percent: number; tokens: number; window: number } | null
-  week: { percent: number; mark: number | null; today: string | null; todayTone: Tone; reset: string | null; recommended: number | null; pace: number | null } | null
-  turn: { text: string } | null
-  cache: { tone: Tone; alert: string | null } | null
-  history: number[]
-  mood?: 'run' | 'flag' | 'zz' // 밴드 고양이: 일하는 중 / 알릴 일이 있음 / 쉬는 중
-}
-const B = {
-  ink: '#14172B', dim: '#5B6080', line: '#E3E6F2', soft: '#EEF0F8', white: '#FFFFFF',
-  accent: '#4F6BFF', accent2: '#8B5CF6', cyan: '#22B8CF', amber: '#F59E0B', orange: '#F97316', rose: '#F43F5E',
-  okBg: '#DEF5ED', ok: '#047857', amberBg: '#FEF3C7', amberText: '#92400E', roseBg: '#FFE4E8', roseText: '#BE123C', infoBg: '#E8ECFF', infoText: '#3F5BEF',
-}
-const SANS = "'Noto Sans KR','Malgun Gothic',system-ui,sans-serif"
-const MONO = "'JetBrains Mono',Consolas,monospace"
-const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
-type Run = { t: string; fill: string; weight?: number; mono?: boolean }
-// Consolas 에는 한글이 없어 한글이 깨져 보이므로, 숫자용 글꼴 조각 안의 한글은 sans 로 나눠 그린다.
-const HANGUL = /([ᄀ-ᇿ가-힣]+)/
-const splitMono = (runs: Run[]): Run[] => runs.flatMap(r => (r.mono ? r.t.split(HANGUL).filter(Boolean).map(t => ({ ...r, t, mono: !HANGUL.test(t) })) : [r]))
-const rs = (runs: Run[], x: number, y: number, size: number, anchor = '') =>
-  `<text x="${x}" y="${y}" font-size="${size}" xml:space="preserve"${anchor ? ` text-anchor="${anchor}"` : ''}>${splitMono(runs).map(r => `<tspan fill="${r.fill}" font-family="${r.mono ? MONO : SANS}" font-weight="${r.weight ?? 400}">${xml(r.t)}</tspan>`).join('')}</text>`
-const rsW = (runs: Run[], size: number) => runs.reduce((n, r) => n + tw(r.t, size, r.mono, (r.weight ?? 400) >= 600), 0)
-/** 그림의 원래 크기(width·height 속성). Svg 에 그대로 넘겨 패널 폭에 맞춰 커지지 않게 한다. */
-const sizeOf = (svg: string): { width?: number; height?: number } => {
-  const m = /<svg[^>]*\swidth="([\d.]+)"[^>]*\sheight="([\d.]+)"/.exec(svg)
-  return m ? { width: Math.round(Number(m[1])), height: Math.round(Number(m[2])) } : {}
-}
-const svgDoc = (w: number, h: number, body: string, z = 1, extra = '') =>
-  `<svg xmlns="http://www.w3.org/2000/svg" width="${w * z}" height="${h * z}" viewBox="0 0 ${w} ${h}"><defs><linearGradient id="gi" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${B.accent}"/><stop offset="1" stop-color="${B.accent2}"/></linearGradient><linearGradient id="gd" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${B.accent}"/><stop offset="1" stop-color="${B.accent2}"/></linearGradient><linearGradient id="gv" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${B.accent}"/><stop offset="1" stop-color="${B.accent2}"/></linearGradient><linearGradient id="gs" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${B.accent}" stop-opacity=".45"/><stop offset="1" stop-color="${B.accent}" stop-opacity="0"/></linearGradient>${extra}</defs>${body}</svg>`
-/** 컨텍스트 색 눈금(25/50/75/90%): 시안 → 인디고 → 호박 → 주황 → 로즈. 인디고 구간은 그라데이션. */
-const levelFill = (p: number, dir: 'h' | 'd' = 'h') => (p < 25 ? B.cyan : p < 50 ? (dir === 'h' ? 'url(#gi)' : 'url(#gd)') : p < 75 ? B.amber : p < 90 ? B.orange : B.rose)
-const levelSolid = (p: number) => (p < 25 ? B.cyan : p < 50 ? B.accent : p < 75 ? B.amber : p < 90 ? B.orange : B.rose)
-const toneOf = (t: Tone) => (t === 'ok' ? { bg: B.okBg, fg: B.ok } : t === 'warn' ? { bg: B.amberBg, fg: B.amberText } : t === 'err' ? { bg: B.roseBg, fg: B.roseText } : t === 'info' ? { bg: B.infoBg, fg: B.infoText } : { bg: B.soft, fg: B.dim })
-const CLOUD = 'M7 18a4 4 0 0 1-.5-7.97A6 6 0 0 1 18 9.5a4.2 4.2 0 0 1-.5 8.5H7z'
-const MOOD_BG = { run: '#E4E9FF', flag: '#FEF3C7', zz: '#EEF0F8' }
-/** 파스텔 동그라미 안의 고양이. 이 그림을 쓰는 이미지는 defs 에 CAT[mood] 를 함께 담아야 한다. */
-const catAvatar = (mood: 'run' | 'flag' | 'zz', cx: number, cy: number) => `<circle cx="${cx}" cy="${cy}" r="14" fill="${MOOD_BG[mood]}"/><use href="#${mood}" x="${cx - 11}" y="${cy - 11}" width="22" height="22"/>`
-const gaugeBar = (x: number, y: number, w: number, h: number, pct: number, fill: string, mark: number | null) =>
-  `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${B.line}"/><rect x="${x}" y="${y}" width="${Math.max(h, (w * Math.min(100, pct)) / 100)}" height="${h}" rx="${h / 2}" fill="${fill}"/>` +
-  (mark === null ? '' : `<rect x="${x + (w * Math.min(100, mark)) / 100 - 1}" y="${y - 3}" width="2" height="${h + 6}" rx="1" fill="${B.ink}"/>`)
-
-/** 접힌 밴드: 시안 3번 1절. 폭이 모자라면 하위 → 턴 → 오늘 권장 순으로 숨긴다(컨텍스트·주간 게이지는 끝까지). */
-/** 띠 왼쪽 끝의 고양이 하나(띠와 같은 크기 배율). 띠 그림과 떼어 두어야 그 옆에 단추를 놓을 수 있다. */
-export const bandCatSvg = (mood: 'run' | 'flag' | 'zz') => svgDoc(32, 32, catAvatar(mood, 16, 16), 1.12, CAT[mood])
-
-// 개수 알약의 진한 점 색: 결재 로즈, 알림 호박, 확인 초록 (띠의 경고 알약과 같은 한 벌)
-const ASK_DOT = { err: B.rose, warn: B.amber, ok: B.ok } as const
-/**
- * 고양이 옆 개수 알약: 띠의 경고 알약과 같은 연한 바탕 + 진한 점 + 굵은 숫자. 띠 그림과 같은 글꼴·배율이다.
- * 앱 기본 글자로 그리면 점은 탁하고 숫자는 링크색이라 띠와 어울리지 않았다 (2026-11-16 사용자 보고). 단추로 감싸도 그림의 색은 지워지지 않는다.
- */
-export function askPillSvg(level: 'err' | 'warn' | 'ok', n: number): { svg: string; w: number; h: number } {
-  const num: Run[] = [{ t: String(n), fill: toneOf(level).fg, weight: 700, mono: true }]
-  const w = 9 + 8 + 5 + rsW(num, 12) + 9
-  const body = `<rect x="0" y="5" width="${w}" height="22" rx="11" fill="${toneOf(level).bg}"/><circle cx="13" cy="16" r="4" fill="${ASK_DOT[level]}"/>${rs(num, 22, 20, 12)}`
-  return { svg: svgDoc(w, 32, body, 1.12), w: Math.round(w * 1.12), h: Math.round(32 * 1.12) }
-}
-
-export function bandSvg(d: Rich, maxW: number, noCat = false): { svg: string; w: number; hidden: number } {
-  const H = 32 // 얇게 잡고 Z 배로 키워 그린다: 높이는 약 36px, 글씨는 12% 커진다(시안은 52px 에 글씨가 작았다)
-  const Z = 1.12
-  const cy = 16
-  // extra: false 이면 오류가 아닌 검증 칸과 구름 아이콘도 숨긴다 (좁은 창의 마지막 단계)
-  const build = (show: { children: boolean; turn: boolean; today: boolean; extra?: boolean }) => {
-    const items: { w: number; draw: (x: number) => string }[] = []
-    // 알약은 경고·오류만(눈에 띄어야 하는 것). 나머지는 글자만 둬서 차분하게 보인다.
-    const chip = (runs: Run[], tone: Tone) => {
-      const pill = tone === 'warn' || tone === 'err'
-      const w = rsW(runs, 12) + (pill ? 18 : 2)
-      items.push({ w, draw: x => `${pill ? `<rect x="${x}" y="${cy - 11}" width="${w}" height="22" rx="11" fill="${toneOf(tone).bg}"/>` : ''}${rs(runs, x + (pill ? 9 : 1), cy + 4, 12)}` })
-    }
-    if (d.verify && (show.extra !== false || d.verify.tone === 'err')) chip([{ t: d.verify.text, fill: toneOf(d.verify.tone).fg, weight: 700 }], d.verify.tone)
-    if (d.context) {
-      const c = d.context
-      const label: Run[] = [{ t: '컨텍스트', fill: B.dim }]
-      const val: Run[] = [{ t: `${c.percent}%`, fill: B.ink, weight: 700, mono: true }]
-      const lw = rsW(label, 12) + 8
-      items.push({ w: lw + 96 + 8 + rsW(val, 13), draw: x => `${rs(label, x, cy + 4, 12)}${gaugeBar(x + lw, cy - 3, 96, 6, c.percent, levelFill(c.percent), null)}${rs(val, x + lw + 96 + 8, cy + 5, 13)}` })
-    }
-    if (d.week) {
-      const k = d.week
-      const label: Run[] = [{ t: '주', fill: B.dim }]
-      const val: Run[] = [{ t: `${Math.round(k.percent)}%`, fill: B.ink, weight: 700, mono: true }]
-      // Consolas 에는 한글이 없어 "오늘"이 깨지므로 한글은 sans, 숫자만 mono 로 나눠 그린다.
-      const todayFill = k.todayTone === 'mute' ? B.dim : toneOf(k.todayTone).fg
-      const todayRuns: Run[] = k.today ? [{ t: '오늘 ', fill: todayFill }, { t: k.today, fill: todayFill, mono: true }] : []
-      const showToday = show.today && todayRuns.length > 0
-      const todayPill = k.todayTone === 'warn' || k.todayTone === 'err' // 한도를 넘긴 때만 알약
-      const lw = rsW(label, 12) + 8
-      const fillWeek = k.todayTone === 'err' ? B.rose : k.todayTone === 'warn' ? B.amber : 'url(#gi)'
-      items.push({
-        w: lw + 96 + 8 + rsW(val, 13) + (showToday ? 8 + rsW(todayRuns, 11) + (todayPill ? 16 : 0) : 0),
-        draw: x => {
-          const vx = x + lw + 96 + 8
-          let out = `${rs(label, x, cy + 4, 12)}${gaugeBar(x + lw, cy - 3, 96, 6, k.percent, fillWeek, k.mark)}${rs(val, vx, cy + 5, 13)}`
-          if (showToday) {
-            const cx = vx + rsW(val, 13) + 8
-            out += todayPill ? `<rect x="${cx}" y="${cy - 10}" width="${rsW(todayRuns, 11) + 16}" height="20" rx="10" fill="${toneOf(k.todayTone).bg}"/>${rs(todayRuns, cx + 8, cy + 4, 11)}` : rs(todayRuns, cx, cy + 4, 11)
-          }
-          return out
-        },
-      })
-    }
-    if (show.turn && d.turn) chip([{ t: '턴 ', fill: B.dim }, { t: d.turn.text, fill: B.ink, weight: 700, mono: true }], 'mute')
-    if (show.children) chip([{ t: '하위 ', fill: B.dim }, { t: String(d.children), fill: d.children > 0 ? B.infoText : B.ink, weight: 700, mono: true }], 'mute')
-    if (d.cache?.alert) chip([{ t: d.cache.alert, fill: toneOf(d.cache.tone).fg, weight: 700 }], d.cache.tone)
-    if (d.context && show.extra !== false) items.push({ w: 18, draw: x => `<g transform="translate(${x} ${cy - 9}) scale(0.75)" fill="none" stroke="${levelSolid(d.context!.percent)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${CLOUD}"/></g>` })
-    return items
-  }
-  const shows = [
-    { children: true, turn: true, today: true },
-    { children: false, turn: true, today: true },
-    { children: false, turn: false, today: true },
-    { children: false, turn: false, today: false },
-    { children: false, turn: false, today: false, extra: false },
-  ]
-  let pick = shows.length - 1
-  for (let i = 0; i < shows.length; i += 1) {
-    const list = build(shows[i])
-    const total = list.reduce((n, it) => n + it.w, 0) + 18 * Math.max(0, list.length - 1) + 12 + (noCat ? 0 : 28 + 14) + 16
-    if (total <= maxW / Z) {
-      pick = i
-      break
-    }
-  }
-  const items = build(shows[pick])
-  const mood = d.mood ?? 'zz'
-  let x = 12
-  // 고양이는 왼쪽 세로 막대 대신 상태를 말한다. noCat 이면 띠 밖에서 따로 그린다(그 옆에 누를 수 있는 단추를 두려고)
-  let body = noCat ? '' : catAvatar(mood, x + 14, cy)
-  if (!noCat) x += 28 + 14
-  items.forEach(it => {
-    body += it.draw(x)
-    x += it.w + 18
-  })
-  const hidden = (shows[pick].children ? 0 : 1) + (d.turn && !shows[pick].turn ? 1 : 0) + (d.week?.today && !shows[pick].today ? 1 : 0) + (shows[pick].extra === false && d.verify && d.verify.tone !== 'err' ? 1 : 0)
-  return { svg: svgDoc(x - 18 + 16, H, body, Z, CAT[mood]), w: x - 18 + 16, hidden }
-}
-
-// 카드는 흰 바탕에 얇은 테두리로 두고, 경고(페이스가 빠를 때 주간 카드)만 호박색 바탕으로 눈에 띄게 한다. [바탕, 테두리]
-const PLAIN = [B.white, B.line] as const
-const TINT = { ctx: PLAIN, week: PLAIN, weekWarn: ['#FFFBEB', '#F6D58A'] } as const
-const cardBox = (x: number, y: number, w: number, h: number, c: readonly [string, string] = [B.white, B.line]) => `<rect x="${x + 0.5}" y="${y + 0.5}" width="${w - 1}" height="${h - 1}" rx="14" fill="${c[0]}" stroke="${c[1]}"/>`
-const cardTitle = (x: number, y: number, s: string) => rs([{ t: s, fill: B.dim, weight: 600 }], x, y, 12)
+// ---- 데스크톱 띠 그림은 band-ui.ts (토큰은 tokens.ts) 에 있다. 여기는 데이터와 배치만 둔다 ----
 const commaN = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+/** 띠 왼쪽 끝의 고양이 하나. 띠 그림과 떼어 두어야 그 옆에 단추를 놓을 수 있다. */
+export const bandCatSvg = (mood: 'run' | 'flag' | 'zz') => svgDoc(36, 36, catAvatar(mood, 18, 18), false, CAT[mood])
 
-/** 펼친 상세: 시안 3번 2절의 2×2 카드(컨텍스트, 주간 한도, 캐시, 최근 활동)와 색 눈금 범례. */
-export function panelSvg(d: Rich): { svg: string; w: number; h: number } {
-  // 시안 3번의 2×2 카드. 채팅창 위 자리가 낮아 스크롤이 생기지 않게 아주 낮게 그리고(약 170px), 카드마다 파스텔 바탕을 입힌다(규칙 23).
-  const W = 800
-  const cw = 393
-  const x1 = cw + 14
-  const h1 = 80
-  const sw = cw - 36
-  const top = 6 // 밴드와 카드 사이 여백: 호스트 빈 줄(약 20px) 대신 이미지 안에서 6px 만 둔다
-  const paceWarn = (d.week?.pace ?? 0) > 10
-  // 컨텍스트: 도넛 옆에 "토큰 / 전체" 를 한 줄로 둔다(세로로 쌓지 않는다)
-  let s = cardBox(0, 0, cw, h1, TINT.ctx) + cardTitle(18, 20, '컨텍스트')
-  const hs = d.history
-  const gw = 80 // 추이 스파크라인(카드 오른쪽 끝). 점이 둘 미만이면 그리지 않고 비워 둔다.
-  const gx = cw - 18 - gw
-  if (d.context) {
-    const c = d.context
-    const r = 17
-    const circ = 2 * Math.PI * r
-    s += `<circle cx="38" cy="52" r="${r}" fill="none" stroke="${B.white}" stroke-width="6"/><circle cx="38" cy="52" r="${r}" fill="none" stroke="${levelFill(c.percent, 'd')}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${((circ * Math.min(100, c.percent)) / 100).toFixed(1)} ${circ.toFixed(1)}" transform="rotate(-90 38 52)"/>`
-    s += rs([{ t: `${c.percent}%`, fill: B.ink, weight: 700, mono: true }], 38, 56, 10, 'middle')
-    const tok: Run[] = [{ t: commaN(c.tokens), fill: B.ink, weight: 700, mono: true }]
-    s += rs(tok, 70, 57, 16) + rs([{ t: ` / ${commaN(c.window)} 토큰`, fill: B.dim, mono: true }], 70 + rsW(tok, 16) + 4, 57, 12)
-  } else s += rs([{ t: '아직 값을 읽지 못했습니다', fill: B.dim }], 18, 52, 14)
-  if (hs.length >= 2) {
-    const lo = Math.min(...hs)
-    const hi = Math.max(Math.max(...hs), lo + 10)
-    const pts = hs.map((p, i) => [(i / (hs.length - 1)) * gw, 30 - ((p - lo) / (hi - lo)) * 24] as const)
-    const line = pts.map(([px, py], i) => `${i === 0 ? 'M' : 'L'}${px.toFixed(1)} ${py.toFixed(1)}`).join(' ')
-    s += `<g transform="translate(${gx} 10)"><path d="${line} L${gw} 34 L0 34 Z" fill="url(#gs)"/><path d="${line}" fill="none" stroke="${B.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>`
-  }
-  // 주간 한도: "44%  리셋 11/18 06:00 ······ 빠름 +9%p" 를 한 줄로, 그 아래에 막대
-  s += cardBox(x1, 0, cw, h1, paceWarn ? TINT.weekWarn : TINT.week) + cardTitle(x1 + 18, 20, '주간 한도')
-  if (d.week) {
-    const k = d.week
-    const paceTone: Tone = k.pace === null ? 'mute' : k.pace > 10 ? 'warn' : 'ok'
-    const big: Run[] = [{ t: `${Math.round(k.percent)}%`, fill: B.ink, weight: 700, mono: true }]
-    s += rs(big, x1 + 18, 46, 24)
-    const l1: Run[] = k.reset ? [{ t: '리셋 ', fill: B.dim }, { t: k.reset, fill: B.ink, weight: 700, mono: true }] : [{ t: '리셋 시각 모름', fill: B.dim }]
-    s += rs(l1, x1 + 18 + rsW(big, 24) + 12, 45, 13)
-    if (k.pace !== null) {
-      const pt = k.pace > 0 ? `빠름 +${Math.round(k.pace)}%p` : `여유 ${Math.round(k.pace)}%p`
-      // 알약 없이 글자만: 빠름은 호박색, 여유는 초록, 그 사이는 회색
-      s += rs([{ t: pt, fill: toneOf(paceTone).fg, weight: 700 }], x1 + cw - 18, 44, 13, 'end')
-    }
-    s += gaugeBar(x1 + 18, 58, sw, 7, k.percent, k.todayTone === 'err' ? B.rose : k.todayTone === 'warn' ? B.amber : 'url(#gi)', k.mark)
-    if (k.mark !== null && k.recommended !== null) s += rs([{ t: `오늘 권장 ${k.recommended.toFixed(0)}%p`, fill: B.dim }], x1 + 18 + (sw * Math.min(100, k.mark)) / 100, 77, 11, 'middle')
-  } else s += rs([{ t: '주간 한도 값을 읽지 못했습니다', fill: B.dim }], x1 + 18, 52, 14)
-  // 캐시·최근 활동 카드는 뺐다: 턴·검증·하위는 상단 바에, 캐시는 만료가 가까워지면 상단 바에 경고로 나온다.
-  // 색 눈금 안내 줄은 뺐다: 컨텍스트 색은 25/50/75/90% 에서 바뀌고, 붉을수록 위험하다는 것은 색만 봐도 안다.
-  // 하위 에이전트 줄도 뺐다: 목록은 에이전트 패널이 보여 주고, 수는 상단 바의 "하위" 칸에 있다.
-  const H = h1 + 2 + top
-  return { svg: svgDoc(W, H, `<g transform="translate(0 ${top})">${s}</g>`), w: W, h: H }
+/** 5시간 한도 리셋 시각: 오늘이면 "HH:MM", 아니면 "M/D HH:MM". 모르면 null. */
+const fiveReset = (resetsAt: string | undefined, now: number, hm: (ms: number) => string, md: (ms: number) => string) => {
+  const t = resetsAt ? Date.parse(resetsAt) : NaN
+  if (!Number.isFinite(t)) return null
+  return new Date(t).toDateString() === new Date(now).toDateString() ? hm(t) : `${md(t)} ${hm(t)}`
 }
 
 /** 지금 값들을 그림 데이터로 모은다. 띠의 글자 칸(buildSegs)과 같은 규칙으로 판정한다. */
@@ -719,14 +962,38 @@ function richData(now: number, isWorking: boolean): Rich {
     verify: verifying ? { tone: 'info', text: '● 검증 중…' } : verify ? { tone: verify.state === 'ok' ? 'ok' : verify.state === 'fail' ? 'err' : 'warn', text: verify.text } : null,
     children,
     context,
-    week: week ? { percent: week.percent, mark: b && dayBase ? dayBase.percent + b.recommended : null, today: b && used !== null ? `${used.toFixed(0)}/${b.recommended.toFixed(0)}%p` : null, todayTone, reset: Number.isFinite(reset) ? `${md(reset)} ${hm(reset)}` : null, recommended: b ? b.recommended : null, pace: b ? b.pace : null } : null,
+    week: week ? { percent: week.percent, mark: b && dayBase ? dayBase.percent + b.recommended : null, today: b && used !== null ? `${used.toFixed(0)}/${b.recommended.toFixed(0)}%p` : null, todayTone, reset: Number.isFinite(reset) ? `${md(reset)} ${hm(reset)}` : null, recommended: b ? b.recommended : null, pace: b ? b.pace : null, projected: weekProjection(week.percent, reset, now) } : null,
     turn: isWorking && turnStartedAt > 0 ? { text: fmtDur(now - turnStartedAt) } : lastTurnSec !== null ? { text: fmtDur(lastTurnSec * 1000) } : null,
     cache:
       lastAnswerAt > 0
-        ? { tone: cacheTone, alert: isWorking || left === null ? null : left <= 0 ? '✗ 캐시 만료' : left <= 20 ? `${left <= 10 ? '✗' : '⚠'} 캐시 ${left}분` : null }
+        ? // 만료는 마지막 답 뒤 60분이라는 가정값이라 "약"·"(추정)" 을 붙인다
+          { tone: cacheTone, alert: isWorking || left === null ? null : left <= 0 ? '✗ 캐시 만료(추정)' : left <= 20 ? `${left <= 10 ? '✗' : '⚠'} 캐시 약 ${left}분` : null, left }
         : null,
     history,
     mood: isWorking ? 'run' : alert ? 'flag' : 'zz',
+    five: five ? { percent: five.percent, reset: fiveReset(five.resetsAt, now, hm, md) } : null,
+    limits: lastUsageAt > 0 ? limitKinds : null,
+    hits,
+    turnTokens,
+    costs,
+    costTotal: costUsd,
+    secs,
+    agents: agentCounts,
+    rules,
+    verifies,
+    session: startedAt > 0 ? { elapsed: fmtDur(now - startedAt), turns: turnCount, staleMin: lastUsageAt > 0 ? Math.floor((now - lastUsageAt) / 60_000) : null } : null,
+    // 시간당 비용: 10분이 지나야 보인다 (그 전은 값이 크게 흔들린다)
+    perHour: costUsd !== null && startedAt > 0 && now - startedAt >= 600_000 ? costUsd / ((now - startedAt) / 3_600_000) : null,
+    compacts,
+    tools: { calls: tools.calls, errors: tools.errors, denies: tools.denies, by: Object.entries(tools.by).sort((p, q) => q[1] - p[1]) },
+    edits: { files: [...edits.files].filter(f => f !== '').length, added: edits.added, removed: edits.removed },
+    model: modelNow,
+    spec,
+    specEmpty,
+    effort: effortNow ?? null,
+    aborted,
+    asks: asked,
+    subTokens,
   }
 }
 
