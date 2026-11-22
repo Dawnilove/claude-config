@@ -90,10 +90,18 @@ let askCounter: () => { request: number; notice: number; report: number } = () =
 let isBoardClosed: () => boolean = () => false
 // 띠가 패널을 연 뒤 세션 보드에 알린다. 알리지 않으면 세션 보드는 계속 닫힌 줄 알아 "세션 ▸" 가 남는다
 let markBoardOpen: () => void = () => undefined
-export function setAskCounter(count: () => { request: number; notice: number; report: number }, closed: () => boolean, opened: () => void) {
+// 띠가 패널을 닫은 뒤 세션 보드에 알린다
+let markBoardClosed: () => void = () => undefined
+export function setAskCounter(
+  count: () => { request: number; notice: number; report: number },
+  closed: () => boolean,
+  opened: () => void,
+  shut: () => void = () => undefined,
+) {
   askCounter = count
   isBoardClosed = closed
   markBoardOpen = opened
+  markBoardClosed = shut
 }
 
 /** 세션이 시작할 때: 5초 타이머를 걸고 사용량을 읽는다. */
@@ -277,8 +285,9 @@ export const register: Register = on => {
       const hint = effortHint(effortNeed, effortNow)
       if (hint) children.push(Text({ key: `${key}effort`, color: 'warning', bold: true, children: `${hint} ` }))
       if (showHandoff()) children.push(Button({ key: `${key}handoff`, label: '인계 ▸', plain: true, dimColor: true, onPress: () => sendHandoff($) }))
-      // 터미널: 패널이 닫혀 있으면 상세 앞에 여는 단추를 둔다
+      // 터미널: 상세 앞에 패널을 여닫는 단추를 둔다. 패널의 × 는 Orca 같은 터미널 앱의 창 단추와 겹쳐 찾기 어렵다 (2026-11-22 사용자 보고)
       if (isBoardClosed()) children.push(Button({ key: 'open-board', label: '세션 ▸', plain: true, dimColor: true, onPress: () => openBoard($) }))
+      else children.push(Button({ key: 'close-board', label: '세션 ◂', plain: true, dimColor: true, onPress: () => closeBoard($) }))
       children.push(
         Button({
           key: `${key}detail`,
@@ -316,6 +325,13 @@ async function openBoard($: any) {
   await $.ui.open({ id: 'session-board', title: '세션', columns: 40 })
   markBoardOpen()
   $.ui.invalidate('ui.render') // "세션 ▸" 를 띠에서 지운다
+}
+
+/** 세션 보드 패널을 닫는다. 명령(/session_board)을 거치지 않아 대화에 줄이 남지 않는다. */
+async function closeBoard($: any) {
+  await $.ui.close({ id: 'session-board' })
+  markBoardClosed()
+  $.ui.invalidate('ui.render') // "세션 ◂" 를 "세션 ▸" 로 바꾼다
 }
 
 async function tick($: any) {

@@ -162,6 +162,15 @@ let me: Rec | null = null
 let dir = ''
 let board: Rec[] = []
 let isOpen = false // 패널을 열어 두려는 중(사용자가 닫으면 false)
+// Orca 터미널(ORCA_TERMINAL_HANDLE=term_…): 패널을 스스로 열지 않는다. 결재는 Orca 의 에이전트 대시보드가 모아 보이고,
+// 패널이 터미널 폭을 차지한다 (2026-11-22 사용자 결정). 사용자가 띠의 "세션 ▸" 나 /session_board 로 열 때만 연다.
+let inOrcaTerminal = false
+
+/** Orca 터미널인가. 코드를 다시 읽으면(reload) 모듈 값이 지워지고 session.start 는 다시 오지 않으므로, 필요할 때 환경 변수를 다시 읽는다. */
+async function isOrcaTerminal($: any): Promise<boolean> {
+  if (!inOrcaTerminal) inOrcaTerminal = /^term_/.test((await $.env.get('ORCA_TERMINAL_HANDLE').catch(() => undefined)) ?? '')
+  return inOrcaTerminal
+}
 let ticker: { cancel: () => void } | null = null
 let tick = 0
 let openId = '' // 펴진 세션 줄(이름을 눌러 편다). 하나만 펴진다
@@ -250,7 +259,8 @@ async function announce($: any) {
   })
   if (fresh.length === 0) return
   for (const r of fresh) announced.add(`${r.id}:${openAsk(r)!.at}`)
-  await openPane($)
+  if (!(await isOrcaTerminal($))) await openPane($) // Orca 터미널은 닫아 둔 패널을 다시 열지 않고 토스트만 띄운다
+  else $.ui.invalidate('ui.render') // 띠의 개수만 바꾼다
   void $.ui.toast(`세션 보드에 결재·알림 ${fresh.length}개가 왔다`)
 }
 
@@ -405,6 +415,9 @@ export const register: Register = (on, options) => {
     () => {
       isOpen = true
     },
+    () => {
+      isOpen = false
+    },
   )
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -438,10 +451,8 @@ export const register: Register = (on, options) => {
     ticker = $.clock.every(TICK_MS, () => onTick($))
     // 세션을 열면 패널도 같이 연다. 사용자가 닫으면 이번 세션에서는 다시 열지 않는다.
     // 데스크톱 앱 세션은 SDK 로 실행돼 isInteractive 가 false 이고 화면도 늦게 붙는다. 그래도 열기를 요청해 두면 화면이 붙을 때 그려진다.
-    // Orca 터미널(ORCA_TERMINAL_HANDLE=term_…)에서는 자동으로 열지 않는다: 결재는 Orca 의 에이전트 대시보드가 모아 보이고,
-    // 패널이 터미널 폭을 차지한다 (2026-11-22 사용자 결정). 띠의 "세션 ▸" 나 /session_board 로 연다.
-    const inOrcaTerminal = /^term_/.test((await $.env.get('ORCA_TERMINAL_HANDLE')) ?? '')
-    if (!inOrcaTerminal) await openPane($)
+    inOrcaTerminal = false // 새 세션: 다시 판정한다
+    if (!(await isOrcaTerminal($))) await openPane($)
     return result
   })
 

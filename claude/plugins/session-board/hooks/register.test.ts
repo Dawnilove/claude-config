@@ -294,9 +294,9 @@ function fakeBoard(on: On, files: Record<string, string>, ageMs = 60_000) {
   let clock = 1
   const t0 = Date.now()
   const mtimes: Record<string, number> = Object.fromEntries(Object.keys(files).map(f => [f, t0 - ageMs]))
-  const seen = { ran: [] as string[][], toasts: [] as string[], opens: 0, env: { parent: undefined as string | undefined }, messages: [] as unknown[], during: undefined as any, tooBig: new Set<string>(), scripts: [] as string[], psOut: '' }
+  const seen = { ran: [] as string[][], toasts: [] as string[], opens: 0, env: { parent: undefined as string | undefined, orca: undefined as string | undefined }, messages: [] as unknown[], during: undefined as any, tooBig: new Set<string>(), scripts: [] as string[], psOut: '' }
   const base = (p: unknown) => String(p).replaceAll('\\', '/').split('/').pop() ?? ''
-  on('env.get', (_, e: any) => ({ value: e.name === 'CLAUDE_CODE_HOST_SESSION_ID' ? 'local_me-1' : e.name === 'CLAUDE_CODE_SESSION_ID' ? seen.env.parent : 'C:/home' }) as any)
+  on('env.get', (_, e: any) => ({ value: e.name === 'CLAUDE_CODE_HOST_SESSION_ID' ? 'local_me-1' : e.name === 'CLAUDE_CODE_SESSION_ID' ? seen.env.parent : e.name === 'ORCA_TERMINAL_HANDLE' ? seen.env.orca : 'C:/home' }) as any)
   on('session.cwd', () => ({ value: 'C:/work/p' }))
   on('session.id', () => ({ value: 'me' }))
   on('session.root', () => ({ value: 'C:/work/p' }))
@@ -455,6 +455,18 @@ test('같은 프로젝트의 새 결재가 오면 패널을 열고 토스트로 
   await new Promise(r => setTimeout(r, 10))
   expect(seen.toasts.length).toBe(1)
   expect(seen.opens).toBe(opens + 1) // 시작 때의 열기 1번만
+})
+
+test('Orca 터미널에서는 새 결재가 와도 패널을 다시 열지 않고 토스트만 띄운다', async ($, on) => {
+  const at = LIVE()
+  const files: Record<string, string> = { 'a.json': file('a', { root: 'c:/work/p', ask: { kind: 'request', question: '결재', background: [], options: [], at } }) }
+  const seen = fakeBoard(on, files)
+  seen.env.orca = 'term_abc'
+  await $.session.start(START)
+  await new Promise(r => setTimeout(r, 10))
+  expect(seen.toasts).toEqual(['세션 보드에 결재·알림 1개가 왔다'])
+  expect(seen.opens).toBe(0) // 시작 때도, 새 결재 때도 열지 않는다
+  seen.env.orca = undefined // 다음 시험에 남기지 않는다
 })
 
 test('내 기록을 다시 쓸 때 다른 세션의 패널이 쓴 닫은 시각을 잃지 않는다', async ($, on) => {
