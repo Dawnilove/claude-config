@@ -9,6 +9,7 @@ import type { Register } from 'claude-code'
 
 import { C, KIND_LABEL, SKIN, avatarSvg, barSvg, clip, fmtDur, headOf } from './art'
 import type { Mood } from './art'
+import { hashMs } from './cat'
 import { APP_ID_FORMAT, closable, countAsks, deadLabel, purgeable, groupOf, isDead, isNestedSession, judge, openAsk, openReport, optionsLine, orphanIds, parseAsk, parseReport } from './asks'
 import type { Ask, Group, Report } from './asks'
 import { countAgentCall, register as registerAgents, startAgentTicker } from './agents'
@@ -633,7 +634,7 @@ function sessionCard($: any, t: any, r: Rec, g: Mood, now: number, isMe: boolean
     gap: 'sm',
     children: [
       // 이미지 크기를 고정한다: 크기를 안 주면 패널을 넓힐 때 이미지가 폭에 맞춰 끝없이 커진다
-      Box({ key: 'avb', flexShrink: 0, children: [Svg({ key: 'av', source: avatarSvg(g), alt: `${SKIN[g].alt} 고양이`, width: 48, height: 48 })] }),
+      Box({ key: 'avb', flexShrink: 0, children: [Svg({ key: 'av', source: avatarSvg(g, r.since + hashMs(r.id)), alt: `${SKIN[g].alt} 고양이`, width: 48, height: 48 })] }),
       Box({
         key: 'mid',
         flexDirection: 'column',

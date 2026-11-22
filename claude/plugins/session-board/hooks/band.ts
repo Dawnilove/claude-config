@@ -5,7 +5,8 @@
 
 import type { Register } from 'claude-code'
 
-import { CAT, fmtDur, isWide, tw } from './art'
+import { fmtDur, isWide, tw } from './art'
+import { catSymbol } from './cat'
 
 const DAY = 86_400_000
 // ponytail 줄의 안쪽 여백에 맞추는 들여쓰기 칸 수(데스크톱 화면만). 화면에서 보고 어긋나면 이 값만 바꾼다.
@@ -108,8 +109,12 @@ export function setAskCounter(
   boardHidden = hidden
 }
 
+// 띠 고양이의 위상: 세션이 시작한 시각. 세션 카드·에이전트 칸의 고양이와 박자가 갈린다
+let bandSince = 0
+
 /** 세션이 시작할 때: 5초 타이머를 걸고 사용량을 읽는다. */
 export async function bandStart($: any) {
+  bandSince = await $.clock.now()
   ticker?.cancel()
   ticker = $.clock.every(5000, () => tick($))
   try {
@@ -569,7 +574,7 @@ const levelSolid = (p: number) => (p < 25 ? B.cyan : p < 50 ? B.accent : p < 75 
 const toneOf = (t: Tone) => (t === 'ok' ? { bg: B.okBg, fg: B.ok } : t === 'warn' ? { bg: B.amberBg, fg: B.amberText } : t === 'err' ? { bg: B.roseBg, fg: B.roseText } : t === 'info' ? { bg: B.infoBg, fg: B.infoText } : { bg: B.soft, fg: B.dim })
 const CLOUD = 'M7 18a4 4 0 0 1-.5-7.97A6 6 0 0 1 18 9.5a4.2 4.2 0 0 1-.5 8.5H7z'
 const MOOD_BG = { run: '#E4E9FF', flag: '#FEF3C7', zz: '#EEF0F8' }
-/** 파스텔 동그라미 안의 고양이. 이 그림을 쓰는 이미지는 defs 에 CAT[mood] 를 함께 담아야 한다. */
+/** 파스텔 동그라미 안의 고양이. 이 그림을 쓰는 이미지는 defs 에 catSymbol(mood) 를 함께 담아야 한다. */
 const catAvatar = (mood: 'run' | 'flag' | 'zz', cx: number, cy: number) => `<circle cx="${cx}" cy="${cy}" r="14" fill="${MOOD_BG[mood]}"/><use href="#${mood}" x="${cx - 11}" y="${cy - 11}" width="22" height="22"/>`
 const gaugeBar = (x: number, y: number, w: number, h: number, pct: number, fill: string, mark: number | null) =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${B.line}"/><rect x="${x}" y="${y}" width="${Math.max(h, (w * Math.min(100, pct)) / 100)}" height="${h}" rx="${h / 2}" fill="${fill}"/>` +
@@ -577,7 +582,7 @@ const gaugeBar = (x: number, y: number, w: number, h: number, pct: number, fill:
 
 /** 접힌 밴드: 시안 3번 1절. 폭이 모자라면 하위 → 턴 → 오늘 권장 순으로 숨긴다(컨텍스트·주간 게이지는 끝까지). */
 /** 띠 왼쪽 끝의 고양이 하나(띠와 같은 크기 배율). 띠 그림과 떼어 두어야 그 옆에 단추를 놓을 수 있다. */
-export const bandCatSvg = (mood: 'run' | 'flag' | 'zz') => svgDoc(32, 32, catAvatar(mood, 16, 16), 1.12, CAT[mood])
+export const bandCatSvg = (mood: 'run' | 'flag' | 'zz', phaseMs = bandSince) => svgDoc(32, 32, catAvatar(mood, 16, 16), 1.12, catSymbol(mood, phaseMs))
 
 // 개수 알약의 진한 점 색: 결재 로즈, 알림 호박, 확인 초록 (띠의 경고 알약과 같은 한 벌)
 const ASK_DOT = { err: B.rose, warn: B.amber, ok: B.ok } as const
@@ -670,7 +675,7 @@ export function bandSvg(d: Rich, maxW: number, noCat = false): { svg: string; w:
     x += it.w + 18
   })
   const hidden = (shows[pick].children ? 0 : 1) + (d.turn && !shows[pick].turn ? 1 : 0) + (d.week?.today && !shows[pick].today ? 1 : 0) + (shows[pick].extra === false && d.verify && d.verify.tone !== 'err' ? 1 : 0)
-  return { svg: svgDoc(x - 18 + 16, H, body, Z, CAT[mood]), w: x - 18 + 16, hidden }
+  return { svg: svgDoc(x - 18 + 16, H, body, Z, catSymbol(mood, bandSince)), w: x - 18 + 16, hidden }
 }
 
 // 카드는 흰 바탕에 얇은 테두리로 두고, 경고(페이스가 빠를 때 주간 카드)만 호박색 바탕으로 눈에 띄게 한다. [바탕, 테두리]
