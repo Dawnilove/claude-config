@@ -1,0 +1,38 @@
+{
+  "manifestVersion": 2,
+  "id": "agent-band",
+  "name": "Band",
+  "version": "0.2.0",
+  "description": "Status bar band: how many agents work, how many wait for you, and today's tokens. Each item can be switched off in Settings.",
+  "engines": {
+    "orca": ">=1.4.259"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "capabilities": [{ "kind": "agent:read" }, { "kind": "history:read" }, { "kind": "settings:own" }],
+  "contributes": {
+    "events": [{ "on": "agent.status.changed" }],
+    "commands": [{ "id": "band.list", "title": "Band: list agents" }],
+    "settings": [
+      {
+        "key": "showAgents",
+        "title": "에이전트 띠 (진행 n · 대기 n)",
+        "description": "일하는 에이전트 수와 사용자를 기다리는 에이전트 수를 상태 표시줄에 보인다.",
+        "type": "boolean",
+        "default": true
+      },
+      {
+        "key": "showTokens",
+        "title": "오늘 갱신 세션 토큰",
+        "description": "오늘 갱신된 세션의 누적 토큰 합을 보인다 (오늘 늘어난 양이 아니다). Orca의 사용량 표시(5시간·주간)와는 다른 값이라 기본은 끈다.",
+        "type": "boolean",
+        "default": false
+      }
+    ],
+    "statusBarItems": [
+      { "id": "agents", "text": "에이전트 없음", "icon": "bot", "tooltip": "진행 중인 에이전트와 사용자를 기다리는 에이전트", "command": "band.list" },
+      { "id": "tokens", "text": "토큰 0", "icon": "gauge", "tooltip": "오늘 갱신된 세션의 누적 토큰 합계" }
+    ]
+  }
+}

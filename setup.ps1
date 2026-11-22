@@ -1,23 +1,25 @@
-# Installs this config for one agent: Claude Code (claude\), Codex (codex\) or Antigravity (antigravity\).
+# Installs this config for one agent: Claude Code (claude\), Codex (codex\), Antigravity (antigravity\) or Orca (orca\).
 # ASCII only on purpose: Windows PowerShell 5.1 misreads UTF-8 scripts without a BOM.
 # Usage:  .\setup.ps1                          (Claude Code, as before)
 #         .\setup.ps1 -Agent codex             (Codex CLI / app)
 #         .\setup.ps1 -Agent antigravity       (Antigravity IDE and agy CLI)
+#         .\setup.ps1 -Agent orca              (Orca's own plugins; the agents Orca runs need their own -Agent run)
 #         .\setup.ps1 -Agent codex -Target C:\tmp\x -SkipPlugins   (dry test)
 param(
-    [ValidateSet('claude', 'codex', 'antigravity')]
+    [ValidateSet('claude', 'codex', 'antigravity', 'orca')]
     [string]$Agent = 'claude',
     [string]$Target,
     [switch]$SkipPlugins
 )
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$homes = @{ claude = "$env:USERPROFILE\.claude"; codex = "$env:USERPROFILE\.codex"; antigravity = "$env:USERPROFILE\.gemini\config" }
+$homes = @{ claude = "$env:USERPROFILE\.claude"; codex = "$env:USERPROFILE\.codex"; antigravity = "$env:USERPROFILE\.gemini\config"; orca = "$env:APPDATA\orca" }
 if (-not $Target) { $Target = $homes[$Agent] }
 # A test run into another -Target must not touch real user files or variables.
 $realTarget = $Target.TrimEnd('\') -eq $homes[$Agent]
 $src = Join-Path $root $Agent
-New-Item -ItemType Directory -Force $Target | Out-Null
+# Orca keeps its own data folder; this script must not create it (Orca may not be installed yet).
+if ($Agent -ne 'orca') { New-Item -ItemType Directory -Force $Target | Out-Null }
 
 function Install-Graphify {
     # graphify: code knowledge graph CLI shared by every agent (skill copied from claude\skills\graphify, no hooks).
@@ -66,6 +68,49 @@ function Write-Json($path, $obj) {
     # WriteAllText: no BOM. Set-Content -Encoding utf8 would add one in PowerShell 5.1.
     [IO.File]::WriteAllText($path, (ConvertTo-Json $obj -Depth 30))
     Write-Host "Updated $path"
+}
+
+if ($Agent -eq 'orca') {
+    # Orca runs Claude Code, Codex and Antigravity with their own config folders, so rules, subagents and skills
+    # come from the other -Agent runs. This branch installs Orca's own plugins (orca\plugins\*) with 'orca plugin install'.
+    # A plugin that runs code needs the user's approval in Orca (exit code 3); this script never approves for the user.
+    # session-board (loaded into Claude through CLAUDE_CODE_PLUGIN_DIRS) already runs the same guards, so agent-guard would only repeat them.
+    $pluginDirs = [Environment]::GetEnvironmentVariable('CLAUDE_CODE_PLUGIN_DIRS', 'User')
+    $sessionBoardLoaded = [bool]$pluginDirs -and ([IO.Path]::GetFullPath($pluginDirs).TrimEnd('\') -eq (Join-Path $root 'claude\plugins'))
+    $dirs = @(Get-ChildItem (Join-Path $src 'plugins') -Directory)
+    $install = @($dirs | Where-Object { -not ($_.Name -eq 'agent-guard' -and $sessionBoardLoaded) })
+    $pending = @()
+    $failed = @()
+    if ($install.Count -lt $dirs.Count) {
+        Write-Host "Skipped agent-guard: session-board already guards Claude on this PC. To install it anyway: orca plugin install `"$(Join-Path $src 'plugins\agent-guard')`""
+    }
+    if ($SkipPlugins -or -not $realTarget) {
+        Write-Host "Dry run: would install $(($install | ForEach-Object Name) -join ', ') with 'orca plugin install'."
+    } elseif (-not (Get-Command orca -ErrorAction SilentlyContinue)) {
+        Write-Warning 'orca CLI not found. Start Orca once, then run this script again.'
+        exit 1
+    } else {
+        $ErrorActionPreference = 'Continue'   # exit code 3 (approval needed) must not stop the loop
+        foreach ($d in $install) {
+            # 'orca plugin test' writes typings into <plugin>\.orca. An install hashes and copies them, so the fingerprint
+            # changes after every test run. They are generated and git-ignored: remove them first.
+            Remove-Item (Join-Path $d.FullName '.orca') -Recurse -Force -ErrorAction SilentlyContinue
+            orca plugin install $d.FullName
+            if ($LASTEXITCODE -eq 3) { $pending += $d.Name }
+            elseif ($LASTEXITCODE -ne 0) {
+                $failed += $d.Name
+                Write-Warning "$($d.Name): install failed (exit $LASTEXITCODE). Is Orca running and Plugins turned on (Settings > Plugins)?"
+            }
+        }
+        if ($pending.Count -gt 0) {
+            Write-Host "Approval needed for: $($pending -join ', '). Read what each plugin asks for above, then run the 'orca plugin install ... --approve <fingerprint>' command Orca printed."
+        }
+    }
+    Write-Host 'Done. For the agents Orca runs, also run: setup.ps1 -Agent claude | codex | antigravity.'
+    # Exit codes follow 'orca plugin install': 1 = a failure, 3 = approval still needed, 0 = nothing left to do.
+    if ($failed.Count -gt 0) { exit 1 }
+    if ($pending.Count -gt 0) { exit 3 }
+    exit 0
 }
 
 if ($Agent -eq 'codex') {

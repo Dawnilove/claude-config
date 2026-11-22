@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 2,
+  "id": "agent-guard",
+  "name": "Guard",
+  "version": "0.2.0",
+  "description": "Refuses agent commands that silently corrupt files (sed -i, heredoc writes, string-replace rewrites) and reads of secret files (.env, keys). Each guard can be switched off in Settings.",
+  "engines": {
+    "orca": ">=1.4.248"
+  },
+  "execution": "trusted-worker",
+  "pluginApi": 1,
+  "main": "src/worker.ts",
+  "capabilities": [{ "kind": "settings:own" }],
+  "contributes": {
+    "hooks": [
+      {
+        "event": "agent.tool.before"
+      }
+    ],
+    "settings": [
+      {
+        "key": "editGuard",
+        "title": "파일을 깨뜨리는 명령 거부 (edit-guard)",
+        "description": "sed -i, heredoc로 파일 쓰기, python·PowerShell 문자열 치환 후 덮어쓰기를 막는다.",
+        "type": "boolean",
+        "default": true
+      },
+      {
+        "key": "secretGuard",
+        "title": "비밀 파일 읽기 거부 (secret-guard)",
+        "description": ".env, .credentials.json, 개인 키를 읽는 도구 호출을 막는다.",
+        "type": "boolean",
+        "default": true
+      }
+    ]
+  }
+}

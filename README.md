@@ -2,7 +2,7 @@
 
 # claude-config
 
-AI 코딩 에이전트 개인 설정 묶음. 다른 컴퓨터에 같은 환경을 만든다. 에이전트마다 맞춘 폴더가 따로 있다: `claude/`(Claude Code), `codex/`(Codex), `antigravity/`(Antigravity IDE·`agy` CLI). Codex와 Antigravity 설치는 [8절](#8-codex와-antigravity에-설치한다)에 있다.
+AI 코딩 에이전트 개인 설정 묶음. 다른 컴퓨터에 같은 환경을 만든다. 에이전트마다 맞춘 폴더가 따로 있다: `claude/`(Claude Code), `codex/`(Codex), `antigravity/`(Antigravity IDE·`agy` CLI), `orca/`(Orca 플러그인). Codex와 Antigravity 설치는 [8절](#8-codex와-antigravity에-설치한다), Orca는 [9절](#9-orca에-설치한다)에 있다.
 
 사이트: https://dawnilove.github.io/claude-config/ (묶음을 누르면 작업 흐름의 어느 단계에 끼어드는지 보인다)
 
@@ -21,7 +21,7 @@ AI 코딩 에이전트 개인 설정 묶음. 다른 컴퓨터에 같은 환경�
 | `claude/agents/summarizer.md` | 요약 에이전트 |
 | `claude/skills/stageshow/` | 로컬 스킬 (계정에 올리면 이 사본은 필요 없다) |
 | `claude/skills/design-clash/` | 로컬 스킬. 디자인 스킬 3개로 시안 3개를 따로 만들고 선택기에서 비교한다. 명령: `/design-clash` |
-| `claude/skills/refresh/` | 로컬 스킬. 명령: `/refresh` (로드맵 갱신 → 병렬 진행 → 쓰지 않는 세션 정리 → 결정할 것 보고) |
+| `claude/skills/refresh/` | 로컬 스킬. 명령: `/refresh` (로드맵 갱신 → 병렬 진행 → 쓰지 않는 세션 정리 → 결정할 것 보고). Orca 안에서는 `orca.md`의 절차로 돈다 |
 | `claude/skills/data-iso/` | 로컬 스킬. 측정 데이터(로봇 경로, 센서 기록)를 등각 기술 도면 SVG와 시간 슬라이더로 그린다. `replay.js`는 anatomy(MIT)에서 가져왔다 (`NOTICE`) |
 | `claude/skills/graphify/` | Graphify-Labs/graphify(Apache-2.0) 스킬의 사본. 코드를 지식 그래프로 만들어 질문한다. `/graphify`로 쓰고, 그래프(`graphify-out/graph.json`)가 있는 프로젝트에서만 자동으로 쓴다(설명 줄만 바꿈, 훅 없음). 본체는 `setup.ps1`이 `uv tool install graphifyy`로 `~\.uv-tools`에 설치한다 |
 | `claude/skills/improve/`, `claude/skills/nothing-design/` | 외부 스킬의 사본 (shadcn/improve, dominikmartn/nothing-design-skill, 둘 다 MIT) |
@@ -29,8 +29,9 @@ AI 코딩 에이전트 개인 설정 묶음. 다른 컴퓨터에 같은 환경�
 | `claude/hooks/reminder.txt` | 알림 훅의 문구. 메시지마다 Claude에게 규칙 4개를 알린다 |
 | `codex/` | Codex판: `AGENTS.md`, 하위 에이전트 4개(`agents/*.toml`), 위험 명령 승인 규칙(`rules/`), 알림 훅 문구, 같이 쓰는 스킬 목록(`skills.txt`) |
 | `antigravity/` | Antigravity판: `AGENTS.md`, 하위 에이전트 4개(`agents/*.md`), 알림 훅(`hooks/reminder.ps1`), 같이 쓰는 스킬 목록(`skills.txt`) |
+| `orca/` | Orca판: Orca 자체 플러그인 3개(`plugins/agent-band`, `plugins/agent-guard`, `plugins/ko-language-boost`). Orca가 띄우는 에이전트의 규칙·스킬은 위 폴더들이 맡는다 |
 | `plugins-backup/` | 플러그인 본체의 사본 (`ponytail`, `egm`, `frontend-design`). 백업용이다. 설치는 명령으로 한다. 설치된 판보다 낡을 수 있다 |
-| `setup.ps1` | 설치 스크립트. `-Agent claude`(기본) / `codex` / `antigravity` |
+| `setup.ps1` | 설치 스크립트. `-Agent claude`(기본) / `codex` / `antigravity` / `orca` |
 
 ## 2. 새 컴퓨터에 설치한다 (처음 1번)
 
@@ -198,3 +199,44 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\claude-config\setup.p
 - Codex: 설치 뒤 Codex에서 `/hooks`를 1번 열고 알림 훅을 신뢰한다. 신뢰하기 전에는 훅이 돌지 않는다.
 - 빠진 것: session-board(Claude 데스크톱 앱 전용), `/recall`(Claude 대화 기록 전용), `/refresh`(Claude 하위 세션 전용), `/design-clash`(Claude 디자인 스킬 필요), ponytail·egm 같은 Claude 마켓 플러그인.
 - 되돌리기: 위 표의 파일을 지운다. `*.bak-setup`이 있으면 원래 이름으로 되돌린다.
+
+## 9. Orca에 설치한다
+
+Orca는 Claude Code·Codex·Antigravity를 각자의 설정 폴더로 띄운다. 그래서 전역 규칙, 하위 에이전트, 스킬, `settings.json` 훅은 위의 `-Agent claude | codex | antigravity` 설치가 그대로 Orca 안에서도 적용된다 (Claude는 Orca 터미널과 chat UI에서 시험했다). `orca/`는 그 위에 Orca 자체 플러그인만 둔다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\claude-config\setup.ps1" -Agent orca
+```
+
+| 플러그인 | 하는 일 | 설치 |
+|---|---|---|
+| `agent-band` | 상태 표시줄에 `진행 n · 대기 n` (기본 켬)과 `오늘 갱신 세션 N 토큰` (기본 끔, 세션의 누적 토큰). Claude 데스크톱 앱의 입력창 띠를 옮겼다 | 코드를 도는 플러그인이라 승인이 필요하다 |
+| `agent-guard` | 파일을 깨뜨리는 명령과 비밀 파일 읽기를 거부한다 (둘 다 기본 켬). session-board의 가드를 옮겼다 | 승인이 필요하다. session-board가 로드된 PC(`CLAUDE_CODE_PLUGIN_DIRS`가 이 저장소의 `claude\plugins`)에서는 `setup.ps1`이 설치를 건너뛴다 |
+| `ko-language-boost` | Orca 한국어 화면에서 빠진 문구만 채우는 언어 팩 (1,911개). 원본 Orca에 낸 PR이 병합되면 필요 없다 | 승인 없이 설치된다 |
+
+- 승인은 사용자가 한다. 스크립트는 `orca plugin install <폴더>`를 실행하고, 승인이 필요한 플러그인은 Orca가 출력한 `--approve <지문>` 명령을 보인다. 설치된 권한을 읽고 그 명령을 직접 실행한다. 파일이 바뀌면 지문도 바뀐다.
+- 플러그인 id가 `orca`로 시작하면 Orca가 공식 플러그인용 이름이라며 설치를 거부한다. 그래서 `agent-`를 붙였다.
+- 스킬: `/handoff`와 `/recall`은 Orca에서 그대로 돈다. `/refresh`는 Orca 안이면(`ORCA_CLI_COMMAND`가 있으면) `claude/skills/refresh/orca.md`의 절차로 돈다. Orca CLI에는 보관 명령이 없어서 카드 상태를 "완료"로 바꾸고 닫기·삭제는 먼저 묻는다.
+- 못 옮긴 것: 오른쪽 패널(필요 없다고 했다), 결재함 카드, `인계 ▸` 단추, 컨텍스트 %. Orca가 플러그인에 주지 않는다. 5시간·주간 사용량은 Orca의 기본 상태 표시줄이 이미 보인다 (사용량 칩).
+- `agent-guard`의 규칙은 `claude/plugins/session-board/hooks/guard.ts`·`secrets.ts`의 복사본이다. 규칙을 고치면 두 곳을 같이 고친다.
+- 되돌리기: `orca plugin uninstall local.agent-band` (다른 플러그인도 같다).
+
+### 9-1. 켜기와 끄기
+
+| 끄는 범위 | 방법 |
+|---|---|
+| 플러그인 전체 | Orca의 Settings > Plugins에서 끈다. 또는 `orca plugin disable local.agent-band` (켜기: `orca plugin enable local.agent-band`). 끄면 훅과 띠가 모두 멈춘다 |
+| `agent-band`의 항목 | Settings > Plugins > Band에서 "에이전트 띠", "오늘 토큰"을 끈다. 끈 항목은 상태 표시줄에서 숨고, 꺼진 토큰은 세션 목록을 읽지도 않는다 |
+| `agent-guard`의 가드 | Settings > Plugins > Guard에서 "파일을 깨뜨리는 명령 거부", "비밀 파일 읽기 거부"를 각각 끈다. 설정을 못 읽으면 켜진 채로 둔다 |
+| 언어 팩 | Settings > Appearance > Language를 내장 한국어로 되돌린다. 또는 `orca plugin disable local.ko-language-boost` |
+
+### 9-2. Orca 기존 기능과 겹침 점검 (2026-11-21)
+
+| 대상 | 결과 | 조치 |
+|---|---|---|
+| Orca가 `~/.claude/settings.json`에 넣은 훅 (`orca-agent-hook.exe`, 이벤트 18개)와 `statusLine` | 충돌 없음. `setup.ps1 -Agent claude`를 시험 폴더에 돌려 이 값들이 그대로임을 확인했다 | Claude의 `statusLine`은 Orca가 쓴다. 우리 상태 줄을 넣지 않는다 |
+| Orca의 사용량 칩 (5시간·주간, 상태 표시줄) | `agent-band`의 "오늘 토큰"과 일부 겹친다. 값은 다르다 (칩은 한도의 %, 띠는 오늘 토큰 합) | "오늘 토큰"을 기본 끔으로 했다 |
+| Orca 사이드바의 작업 공간별 에이전트 상태 | `agent-band`의 "진행·대기"와 일부 겹친다. 띠는 모든 작업 공간의 합을 한곳에 보인다 | 필요 없으면 "에이전트 띠"를 끈다 |
+| session-board의 가드 (`CLAUDE_CODE_PLUGIN_DIRS`로 Claude에 로드됨) | **`agent-guard`와 같은 일을 한다.** 이 PC의 Orca 채팅에서 session-board 가드가 `sed -i`를 막는 것을 확인했다. 둘 다 켜면 같은 사유로 두 번 막는다 | 이 PC에서는 `agent-guard`가 중복이다. session-board가 로드된 PC에서는 `setup.ps1`이 설치를 건너뛴다. session-board가 없는 곳에서만 쓸 만하다 |
+| 내장 한국어와 언어 팩 | 팩이 같은 키를 덮어쓴다. 전체 목록이면 내장 번역이 좋아져도 옛 값으로 덮는다 | 팩을 내장과 다른 문구만 담도록 줄였다 (20,463 → 1,911개) |
+| 다른 설치된 플러그인 | 테마 5개뿐이다. 훅·상태 표시줄 항목을 쓰는 것이 없다 | 없음 |

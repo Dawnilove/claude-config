@@ -22,7 +22,12 @@ claude-config의 진행과 "나중에" 항목. 결정의 원문은 `docs/결정_
 - [x] Codex판·Antigravity판: 시험 폴더에서 규칙·하위 에이전트 4개·스킬을 읽는다. Antigravity 알림 훅이 들어간다. Codex 승인 규칙이 위험 명령에 `prompt`를 낸다 (2026-11-19)
 - [ ] Codex 알림 훅: 실제 설치 뒤 `/hooks`에서 신뢰하고 알림이 들어오는지 본다 (시험 못 함: 신뢰가 대화형이다)
 - [ ] 이 PC에 Codex판·Antigravity판을 실제로 설치한다 (README 8절)
-- [ ] 이 PC의 `CLAUDE_CODE_PLUGIN_DIRS`를 `claude\plugins`로 바꾼다 (`setup.ps1 -SkipPlugins`가 바꾼다). 바꾸기 전에 앱을 다시 시작하면 내 플러그인이 빠진다
+- [x] Orca판 `orca/`: 플러그인 3개 만들었다. `setup.ps1 -Agent orca`는 건조 실행과 승인 요구(종료 코드 3)까지 시험했다 (2026-11-21)
+- [x] Orca 기능과 겹침 점검과 켜기·끄기 (2026-11-21, README 9-1·9-2). 시험: agent-band 12개, agent-guard 7개 통과. `agent-guard`는 session-board 가드와 중복이라 session-board가 로드된 PC에서는 설치를 건너뛴다. 검토 결과 7건을 고쳤다 (원본 session-board에도 있는 가드의 한계 3건은 아직 안 고침: 비밀 파일에 쓰는 명령 오탐, PowerShell 도구의 `sed -i`, `Grep` 도구의 `.env`)
+- [ ] Orca에 `agent-band`·`agent-guard`를 실제로 설치하고 승인한다 (README 9절). 설치 뒤 확인할 것: 띠가 chat UI에서도 보이는가, `agent.status.changed`가 chat 세션에도 오는가, `agent.tool.before` 훅이 chat 세션에서도 도는가 (`orca plugin logs local.agent-guard`)
+- [x] `/refresh`의 Orca 절차: `claude/skills/refresh/orca.md` (세션 확인·열기·정리를 `orca worktree`·`orca agent`로). `/handoff`와 `/recall`은 Orca에서 그대로 돈다 (2026-11-21). 읽기 명령만 시험했다
+- [ ] Orca에서 `/refresh`를 실제로 1번 돌려 본다: 자식 세션 열기(`worktree create --agent`)와 카드 완료 표시가 되는지
+- [x] 이 PC의 `CLAUDE_CODE_PLUGIN_DIRS`는 `claude\plugins`다 (Orca 채팅 세션에서 확인, 2026-11-21). 다른 PC는 `setup.ps1 -SkipPlugins`가 바꾼다
 
 ## 마감이 있는 일
 
