@@ -79,7 +79,12 @@ if ($Agent -eq 'orca') {
     $sessionBoardLoaded = [bool]$pluginDirs -and ([IO.Path]::GetFullPath($pluginDirs).TrimEnd('\') -eq (Join-Path $root 'claude\plugins'))
     # agent-band is opt-in: its counts come from terminal-pane status events, and Orca's own agent dashboard
     # ("needs attention" lane) also covers chat sessions (2026-11-21 decision).
-    $skip = @{ 'agent-band' = "optional; for the chat UI use Orca's agent dashboard (Settings > Experimental)" }
+    # ko-language-boost is opt-in: a plugin pack replaces the whole locale (English fallback, no protected copy), and
+    # the Korean fixes are merged upstream (stablyai/orca#46392, #46408, #46832, #46840; 2026-11-22 decision).
+    $skip = @{
+        'agent-band' = "optional; for the chat UI use Orca's agent dashboard (Settings > Experimental)"
+        'ko-language-boost' = "optional; Orca's built-in Korean has these fixes from the release after v1.4.269"
+    }
     if ($sessionBoardLoaded) { $skip['agent-guard'] = 'session-board already guards Claude on this PC' }
     $dirs = @(Get-ChildItem (Join-Path $src 'plugins') -Directory)
     $install = @($dirs | Where-Object { -not $skip.ContainsKey($_.Name) })

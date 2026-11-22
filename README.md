@@ -212,7 +212,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\claude-config\setup.p
 |---|---|---|
 | `agent-band` | 상태 표시줄에 `진행 n · 대기 n` (기본 켬)과 `오늘 갱신 세션 N 토큰` (기본 끔, 세션의 누적 토큰). Claude 데스크톱 앱의 입력창 띠를 옮겼다 | **선택.** `setup.ps1`은 설치하지 않고 명령만 보인다. 터미널 창의 상태 이벤트로 세므로 chat UI에서는 비어 보일 수 있다. chat UI는 아래 에이전트 대시보드를 쓴다. 승인이 필요하다 |
 | `agent-guard` | 파일을 깨뜨리는 명령과 비밀 파일 읽기를 거부한다 (둘 다 기본 켬). session-board의 가드를 옮겼다 | 승인이 필요하다. session-board가 로드된 PC(`CLAUDE_CODE_PLUGIN_DIRS`가 이 저장소의 `claude\plugins`)에서는 `setup.ps1`이 설치를 건너뛴다 |
-| `ko-language-boost` | Orca 한국어 화면에서 빠진 문구만 채우는 언어 팩 (1,911개). 원본 Orca에 낸 PR이 병합되면 필요 없다 | 승인 없이 설치된다 |
+| `ko-language-boost` | Orca 한국어 화면에서 빠진 문구를 채우던 언어 팩. 번역은 원본 Orca에 머지되었다 (stablyai/orca#46392, #46408, #46832, #46840). v1.4.269 다음 판부터 내장 "한국어"를 쓴다 | **설치하지 않는다.** `setup.ps1`이 건너뛴다. 이 판(차이만 담음)을 설치하면 화면이 영어로 바뀐다. 이유는 폴더의 README에 있다 |
 
 - 승인은 사용자가 한다. 스크립트는 `orca plugin install <폴더>`를 실행하고, 승인이 필요한 플러그인은 Orca가 출력한 `--approve <지문>` 명령을 보인다. 설치된 권한을 읽고 그 명령을 직접 실행한다. 파일이 바뀌면 지문도 바뀐다.
 - 플러그인 id가 `orca`로 시작하면 Orca가 공식 플러그인용 이름이라며 설치를 거부한다. 그래서 `agent-`를 붙였다.
@@ -231,7 +231,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\claude-config\setup.p
 | 플러그인 전체 | Orca의 Settings > Plugins에서 끈다. 또는 `orca plugin disable local.agent-band` (켜기: `orca plugin enable local.agent-band`). 끄면 훅과 띠가 모두 멈춘다 |
 | `agent-band`의 항목 | Settings > Plugins > Band에서 "에이전트 띠", "오늘 토큰"을 끈다. 끈 항목은 상태 표시줄에서 숨고, 꺼진 토큰은 세션 목록을 읽지도 않는다 |
 | `agent-guard`의 가드 | Settings > Plugins > Guard에서 "파일을 깨뜨리는 명령 거부", "비밀 파일 읽기 거부"를 각각 끈다. 설정을 못 읽으면 켜진 채로 둔다 |
-| 언어 팩 | Settings > Appearance > Language를 내장 한국어로 되돌린다. 또는 `orca plugin disable local.ko-language-boost` |
+| 언어 팩 | Settings > Appearance > Language를 내장 한국어로 되돌린다. 또는 `orca plugin uninstall local.ko-language-boost` |
 
 ### 9-2. Orca 기존 기능과 겹침 점검 (2026-11-21)
 
