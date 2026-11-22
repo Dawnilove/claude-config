@@ -438,7 +438,10 @@ export const register: Register = (on, options) => {
     ticker = $.clock.every(TICK_MS, () => onTick($))
     // 세션을 열면 패널도 같이 연다. 사용자가 닫으면 이번 세션에서는 다시 열지 않는다.
     // 데스크톱 앱 세션은 SDK 로 실행돼 isInteractive 가 false 이고 화면도 늦게 붙는다. 그래도 열기를 요청해 두면 화면이 붙을 때 그려진다.
-    await openPane($)
+    // Orca 터미널(ORCA_TERMINAL_HANDLE=term_…)에서는 자동으로 열지 않는다: 결재는 Orca 의 에이전트 대시보드가 모아 보이고,
+    // 패널이 터미널 폭을 차지한다 (2026-11-22 사용자 결정). 띠의 "세션 ▸" 나 /session_board 로 연다.
+    const inOrcaTerminal = /^term_/.test((await $.env.get('ORCA_TERMINAL_HANDLE')) ?? '')
+    if (!inOrcaTerminal) await openPane($)
     return result
   })
 

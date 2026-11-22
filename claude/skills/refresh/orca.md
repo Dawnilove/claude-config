@@ -4,7 +4,7 @@
 
 ## 2단계: 연결된 세션 확인
 
-1. 이 세션의 작업 공간을 본다: `ORCA worktree show --worktree current --json`. 줄 `childWorktreeIds`가 이 세션이 연 자식 작업 공간이다.
+1. 이 세션의 작업 공간을 본다: `ORCA worktree show --worktree current --json`. `result.worktree.childWorktreeIds`가 이 세션이 연 자식 작업 공간이다. `current`는 Orca 작업 공간 안에서만 풀린다. 밖이면 `--worktree path:<저장소 경로>`를 쓴다.
 2. 자식마다 상태를 읽는다: `ORCA worktree ps --since 7d --json`의 `agents[].state`, 또는 `ORCA agent list --json`의 `state`와 `lastAssistantMessage`.
 3. 끝난 자식의 결과를 읽는다: `ORCA agent read <orcaSessionId> --json`. 끝난 에이전트도 읽힌다.
 4. `state`가 `blocked`(승인 필요)나 `waiting`(질문함)인 에이전트는 7단계의 `알림:` 줄로 보고한다. 사용자가 그 작업 공간에서 답해야 한다.
@@ -15,8 +15,12 @@
 - 파일을 고치는 일: 새 작업 공간(새 체크아웃)으로 연다. 같은 파일을 두 세션이 고치지 않는다.
 
   ```text
-  ORCA worktree create --name "<이름>" --parent-worktree current --agent claude --model <모델 id> --effort <수준> --prompt "<브리프>" --json
+  ORCA worktree create --repo path:<저장소 경로> --name "<이름>" --parent-worktree current --agent claude --model <모델 id> --effort <수준> --prompt "<브리프>" --json
   ```
+
+  - 저장소가 Orca 프로젝트로 등록되어 있어야 한다 (`ORCA repo list --json`). 없으면 사용자에게 묻고 `ORCA repo add --path <경로> --json`으로 등록한다.
+  - 새 작업 공간은 `~/orca/workspaces/<저장소>/<이름>`에 생기고 브랜치는 `<계정>/<이름>`이다. 결과의 `result.worktree.path`와 `branch`를 보고에 쓴다.
+  - 에이전트는 사용자의 Chat | CLI 설정대로 열린다 (2026-11-22 시험: chat).
 
 - 읽기만 하는 일(조사, 검토): 지금 작업 공간에 에이전트만 연다.
 

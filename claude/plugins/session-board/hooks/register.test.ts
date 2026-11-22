@@ -226,6 +226,30 @@ test('앱(SDK) 세션처럼 isInteractive 가 false 여도 패널을 열고, 명
   expect([opens, closes]).toEqual([2, 1])
 })
 
+test('Orca 터미널에서는 패널을 자동으로 열지 않고, 명령으로는 연다', async ($, on) => {
+  let opens = 0
+  on('env.get', (_, e: any) => ({ value: e.name === 'ORCA_TERMINAL_HANDLE' ? 'term_abc' : 'C:/home' }) as any)
+  on('session.cwd', () => ({ value: 'C:/work/p' }))
+  on('session.id', () => ({ value: 'me' }))
+  on('clock.now', () => ({ value: Date.now() }))
+  on('clock.every', () => ({ value: {} }) as any)
+  on('command.register', () => ({ value: { command: 'session_board' } }))
+  on('store.get', () => ({ value: undefined }))
+  on('fs.write', () => ({ value: undefined }) as any)
+  on('fs.list', () => ({ value: [] }) as any)
+  on('ui.open', () => {
+    opens += 1
+    return { value: { isPlaced: true } }
+  })
+  on('ui.panes', () => ({ value: [] }) as any)
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true } as any)
+  expect(opens).toBe(0)
+  await $.command.run({ command: 'session_board', args: '' } as any)
+  expect(opens).toBe(1)
+})
+
 test('세션을 열면 패널이 같이 열리고, 접기 단추는 없다 (개수는 입력창 위 띠가 보인다)', async ($, on) => {
   const opens: any[] = []
   const waiting = JSON.stringify(rec({ id: 'w', name: '대기 중', state: 'waiting', waitFor: '답변', since: Date.now(), updatedAt: Date.now() }))

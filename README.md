@@ -217,7 +217,7 @@ powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\claude-config\setup.p
 - 승인은 사용자가 한다. 스크립트는 `orca plugin install <폴더>`를 실행하고, 승인이 필요한 플러그인은 Orca가 출력한 `--approve <지문>` 명령을 보인다. 설치된 권한을 읽고 그 명령을 직접 실행한다. 파일이 바뀌면 지문도 바뀐다.
 - 플러그인 id가 `orca`로 시작하면 Orca가 공식 플러그인용 이름이라며 설치를 거부한다. 그래서 `agent-`를 붙였다.
 - 스킬: `/handoff`와 `/recall`은 Orca에서 그대로 돈다. `/refresh`는 Orca 안이면(`ORCA_CLI_COMMAND`가 있으면) `claude/skills/refresh/orca.md`의 절차로 돈다. Orca CLI에는 보관 명령이 없어서 카드 상태를 "완료"로 바꾸고 닫기·삭제는 먼저 묻는다.
-- **터미널 모드:** Orca 터미널에서 Claude CLI를 쓰면 session-board의 띠(알림 수, 컨텍스트 %, 주간 사용량, 페이스)와 오른쪽 결재함 패널이 그대로 뜬다 (2026-11-21 사용자 화면으로 확인). 글로 쓴 `결재:`·`알림:` 줄도 잡는다.
+- **터미널 모드:** Orca 터미널에서 Claude CLI를 쓰면 session-board의 띠(알림 수, 컨텍스트 %, 주간 사용량, 페이스)가 그대로 뜬다 (2026-11-21 사용자 화면으로 확인). 글로 쓴 `결재:`·`알림:` 줄도 잡는다. 오른쪽 결재함 패널은 터미널 폭을 차지해서 Orca 터미널에서는 자동으로 열지 않는다. 띠의 `세션 ▸`나 `/session_board`로 연다.
 - **chat UI:** session-board 화면이 뜨지 않는다. 결재는 에이전트 대시보드로 본다. 5시간·주간 사용량은 Orca의 기본 상태 표시줄(사용량 칩)이 보인다. 컨텍스트 %와 `인계 ▸` 단추는 없다.
 - `agent-guard`의 규칙은 `claude/plugins/session-board/hooks/guard.ts`·`secrets.ts`의 복사본이다. 규칙을 고치면 두 곳을 같이 고친다.
 - 되돌리기: `orca plugin uninstall local.agent-band` (다른 플러그인도 같다).

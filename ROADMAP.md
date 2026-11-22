@@ -26,7 +26,8 @@ claude-config의 진행과 "나중에" 항목. 결정의 원문은 `docs/결정_
 - [x] Orca 기능과 겹침 점검과 켜기·끄기 (2026-11-21, README 9-1·9-2). 시험: agent-band 12개, agent-guard 7개 통과. `agent-guard`는 session-board 가드와 중복이라 session-board가 로드된 PC에서는 설치를 건너뛴다. 검토 결과 7건을 고쳤다 (원본 session-board에도 있는 가드의 한계 3건은 아직 안 고침: 비밀 파일에 쓰는 명령 오탐, PowerShell 도구의 `sed -i`, `Grep` 도구의 `.env`)
 - [x] Orca에서 결재 모아 보기 (2026-11-21): chat UI는 Orca의 에이전트 대시보드("확인 필요" 칸). 터미널 모드의 Claude는 session-board의 띠와 결재함 패널이 그대로 뜬다 (사용자 화면으로 확인). 그래서 `agent-band`와 `agent-guard`는 선택 설치로 돌렸다 (`setup.ps1`이 설치하지 않고 명령만 보인다)
 - [x] `/refresh`의 Orca 절차: `claude/skills/refresh/orca.md` (세션 확인·열기·정리를 `orca worktree`·`orca agent`로). `/handoff`와 `/recall`은 Orca에서 그대로 돈다 (2026-11-21). 읽기 명령만 시험했다
-- [ ] Orca에서 `/refresh`를 실제로 1번 돌려 본다: 자식 세션 열기(`worktree create --agent`)와 카드 완료 표시가 되는지
+- [x] Orca에서 `/refresh` 절차를 실제로 시험했다 (2026-11-22): `worktree create --agent claude`(Haiku, low)로 자식을 열고 부모 연결(`childWorktreeIds`), `agent read`로 답 읽기, `worktree set --workspace-status completed`까지 모두 됐다. 시험하려고 claude-config를 Orca 프로젝트로 등록했다
+- [x] Orca 터미널에서는 session-board 패널을 자동으로 열지 않는다 (2026-11-22). 띠의 `세션 ▸`나 `/session_board`로 연다
 - [x] 이 PC의 `CLAUDE_CODE_PLUGIN_DIRS`는 `claude\plugins`다 (Orca 채팅 세션에서 확인, 2026-11-21). 다른 PC는 `setup.ps1 -SkipPlugins`가 바꾼다
 
 ## 마감이 있는 일
