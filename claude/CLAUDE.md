@@ -17,6 +17,7 @@
 - After work, summarize: changed files, how to run, what was verified vs. not. Use clickable file links
 - Errors: cause, fix, then verification. State "unverified" if not verified
 - 화면 조작 (2026-11-17 user instruction): 실제 마우스·키보드를 흉내 내거나(user32 SetCursorPos·mouse_event·SendInput, 창 닫기·앞으로 가져오기 등) 사용자 화면을 캡처하기 전에 반드시 먼저 묻는다. 컴퓨터 유즈 도구가 없어도 같다. 묻지 않은 시험은 테스트 코드, 로그, 내장 브라우저 창 안에서만 한다
+- 터미널 정리 (2026-11-21 user instruction "사용이 끝난 터미널은 바로 닫으라해"): 내가 연 터미널 탭·창(run_in_terminal, open_terminal_tab, 새 콘솔로 띄운 프로그램)은 다 쓰면 바로 닫는다. 백그라운드 프로그램은 창 없이 띄운다(Windows: `CREATE_NO_WINDOW`)
 
 ## Coding
 - 언어: 기존 프로젝트는 그 프로젝트의 언어를 따른다. 새 프로젝트는 작업 종류로 고르고 프로젝트 CLAUDE.md에 쓴다: AI·데이터·도구 = Python, ROS2 노드 = Python (고주기·실시간 제어는 C++), 펌웨어 = C, 데스크톱 화면 = PyQt. 정할 수 없으면 Python이다. 고를 때 추천 1개와 이유를 쓴다. 성능이 최우선이면 다시 검토하고 근거를 댄다
@@ -54,6 +55,7 @@
 - Every session (incl. sub-sessions) states the needed effort level + one-line reason BEFORE starting work
 - Do not start work until the user changes the effort level and confirms (e.g. "변경함"). Until then, reading only. After "변경함", check the real model and effort level with `get_session` (target `self`). If they differ from what you proposed, do not start; say so. Where that tool does not exist (terminal `claude`), write "확인하지 못했다" and proceed
 - 예외 (2026-11-15 사용자 지시): 실제 수준이 필요한 수준과 이미 같으면 확인을 기다리지 않는다. `get_session`으로 확인하고 "노력 수준은 <수준>이다. 필요한 수준과 같다."를 1줄로 쓴 뒤 시작한다. `get_session`이 없으면 이 예외를 쓰지 않는다
+- Orca 채팅 (2026-11-22 사용자 승인): Orca 채팅에는 `get_session`이 없고 `orca` CLI도 노력 수준을 주지 않는다. 그래서 시작할 때 사용자가 노력 수준을 1줄로 알려 준다. 알려 주기 전에는 필요한 수준을 쓰고 "확인하지 못했다"로 진행한다
 - 수준이 다르면 `알림:` 줄로 요청한다 (11절 "노력 수준 변경 요청"). 사용자는 칸을 눌러 그 세션으로 가서 수준을 직접 바꾸고 그 세션에 "변경함"이라고 쓴다
 - If the level stops fitting mid-task, stop and propose again. Also propose anew whenever the kind of work changes (e.g. implement → review)
 - Levels: low = docs·progress tables·commits / medium = normal implementation·tests / high = design judgment·evaluation·review·debugging after repeated failure / xhigh+ = separate session on a higher model

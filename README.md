@@ -17,7 +17,7 @@ AI 코딩 에이전트 개인 설정 묶음. 다른 컴퓨터에 같은 환경�
 | 경로 | 내용 |
 |---|---|
 | `claude/CLAUDE.md` | 전역 규칙 (언어, 작업 방식, 코드 유지보수 책임, 노력 수준, 선택표 사용). 모든 판의 원본이다 |
-| `docs/` | 규칙의 본문 5개: 노력 수준, 작업 방식, 요약 시스템, 디자인 스킬 선택표, 검토 선택표. 사이트(`index.html`)도 이 폴더에 있다. 설치는 `.md`만 복사한다 (Claude판만) |
+| `docs/` | 규칙의 본문 6개: 노력 수준, 작업 방식, 요약 시스템, 디자인 스킬 선택표, 검토 선택표, 협업 규칙(`collaboration.md`, 오케스트레이션 총괄용. 원본은 `G:\내 드라이브\collaboration.md`). 사이트(`index.html`)도 이 폴더에 있다. 설치는 `.md`만 복사한다 (Claude판만) |
 | `claude/agents/summarizer.md` | 요약 에이전트 |
 | `claude/skills/stageshow/` | 로컬 스킬 (계정에 올리면 이 사본은 필요 없다) |
 | `claude/skills/design-clash/` | 로컬 스킬. 디자인 스킬 3개로 시안 3개를 따로 만들고 선택기에서 비교한다. 명령: `/design-clash` |
