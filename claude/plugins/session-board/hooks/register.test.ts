@@ -674,6 +674,25 @@ test('띠: 터미널은 그림 없이 글자 칸으로 그리고 개수도 글�
   await ui.unmount()
 })
 
+test('띠: 터미널에서 패널이 열려 있으면 "세션 ◂" 로 닫고, 닫힌 뒤에는 "세션 ▸" 가 보인다', async ($, on) => {
+  const seen = fakeBoard(on, {})
+  let closes = 0
+  on('ui.close', () => {
+    closes += 1
+    return { value: undefined } as any
+  })
+  on('agent.list', () => ({ value: [] }) as any)
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'ponytail 띠' }))
+  await $.session.start({ ...START, surface: 'terminal' } as any) // Orca 밖의 터미널: 시작 때 패널을 연다
+  expect(seen.opens).toBe(1)
+  const ui = await $.ui.mount({ plugin: 'session-board', component: 'AbovePrompt', props: BAND_PROPS, surface: 'terminal' } as any)
+  expect(await ui.find({ type: 'Button', text: /세션 ◂/ } as any)).toBeTruthy()
+  await ui.press({ key: 'close-board' })
+  expect(closes).toBe(1)
+  expect(await ui.find({ type: 'Button', text: /세션 ▸/ } as any)).toBeTruthy() // 세션 보드도 닫힌 것을 안다
+  await ui.unmount()
+})
+
 // 한 창(세션 보드 아래의 확인 카드)은 시험 도구로 그릴 수 없다: 도구 호출이 붙잡혀 있는 동안 패널 그리기가 그 호출을 기다린다. 앱에서 확인한다
 
 // ---- 검토 고침 -------------------------------------------------------------------------
