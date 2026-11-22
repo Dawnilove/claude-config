@@ -259,8 +259,9 @@ async function announce($: any) {
   })
   if (fresh.length === 0) return
   for (const r of fresh) announced.add(`${r.id}:${openAsk(r)!.at}`)
-  if (!(await isOrcaTerminal($))) await openPane($) // Orca 터미널은 닫아 둔 패널을 다시 열지 않고 토스트만 띄운다
-  else $.ui.invalidate('ui.render') // 띠의 개수만 바꾼다
+  // Orca 터미널은 결재함을 껐다: 패널도 토스트도 없다. 결재는 Orca 의 에이전트 대시보드가 모아 보인다 (2026-11-22 사용자 결정)
+  if (await isOrcaTerminal($)) return
+  await openPane($)
   void $.ui.toast(`세션 보드에 결재·알림 ${fresh.length}개가 왔다`)
 }
 
@@ -395,6 +396,7 @@ async function purge($: any, now: number) {
 
 async function onTick($: any) {
   tick += 1
+  await isOrcaTerminal($) // 코드를 다시 읽은 세션도 띠가 결재함을 숨기게 한다
   if (tick % BEAT_EVERY === 0) await save($)
   await refresh($) // 패널이 닫혀 있어도 읽는다: 새 결재를 알려야 한다
   if (isOpen) $.ui.invalidate('ui.render')
@@ -418,6 +420,7 @@ export const register: Register = (on, options) => {
     () => {
       isOpen = false
     },
+    () => inOrcaTerminal, // 띠: 결재·알림·확인 개수와 패널 여닫기 단추를 숨긴다
   )
   on('session.start', async ($, e, next) => {
     const result = await next(e)
@@ -453,6 +456,7 @@ export const register: Register = (on, options) => {
     // 데스크톱 앱 세션은 SDK 로 실행돼 isInteractive 가 false 이고 화면도 늦게 붙는다. 그래도 열기를 요청해 두면 화면이 붙을 때 그려진다.
     inOrcaTerminal = false // 새 세션: 다시 판정한다
     if (!(await isOrcaTerminal($))) await openPane($)
+    else $.ui.invalidate('ui.render') // 띠는 판정 전에 먼저 그려진다: 결재함 칸과 "세션 ▸" 를 바로 지운다
     return result
   })
 

@@ -457,15 +457,22 @@ test('같은 프로젝트의 새 결재가 오면 패널을 열고 토스트로 
   expect(seen.opens).toBe(opens + 1) // 시작 때의 열기 1번만
 })
 
-test('Orca 터미널에서는 새 결재가 와도 패널을 다시 열지 않고 토스트만 띄운다', async ($, on) => {
+test('Orca 터미널은 결재함을 끈다: 새 결재가 와도 패널·토스트가 없고, 띠에 개수와 여닫기 단추가 없다', async ($, on) => {
   const at = LIVE()
   const files: Record<string, string> = { 'a.json': file('a', { root: 'c:/work/p', ask: { kind: 'request', question: '결재', background: [], options: [], at } }) }
   const seen = fakeBoard(on, files)
   seen.env.orca = 'term_abc'
-  await $.session.start(START)
+  on('agent.list', () => ({ value: [] }) as any)
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'ponytail 띠' }))
+  await $.session.start({ ...START, surface: 'terminal' } as any)
   await new Promise(r => setTimeout(r, 10))
-  expect(seen.toasts).toEqual(['세션 보드에 결재·알림 1개가 왔다'])
+  expect(seen.toasts).toEqual([])
   expect(seen.opens).toBe(0) // 시작 때도, 새 결재 때도 열지 않는다
+  await turnOf($)('끝냈다.') // 다른 띠 시험처럼 턴을 끝내 기록을 읽게 한다 (Orca 밖이면 여기서 개수가 생긴다)
+  const ui = await $.ui.mount({ plugin: 'session-board', component: 'AbovePrompt', props: BAND_PROPS, surface: 'terminal' } as any)
+  expect(await ui.find({ type: 'Text', text: /결재 1/ })).toBeFalsy()
+  expect(await ui.find({ type: 'Button', text: /세션 [▸◂]/ } as any)).toBeFalsy()
+  await ui.unmount()
   seen.env.orca = undefined // 다음 시험에 남기지 않는다
 })
 

@@ -92,16 +92,20 @@ let isBoardClosed: () => boolean = () => false
 let markBoardOpen: () => void = () => undefined
 // 띠가 패널을 닫은 뒤 세션 보드에 알린다
 let markBoardClosed: () => void = () => undefined
+// 결재함을 끈 곳(Orca 터미널)인가. 켜져 있으면 띠에 결재·알림·확인 개수와 패널 여닫기 단추를 두지 않는다
+let boardHidden: () => boolean = () => false
 export function setAskCounter(
   count: () => { request: number; notice: number; report: number },
   closed: () => boolean,
   opened: () => void,
   shut: () => void = () => undefined,
+  hidden: () => boolean = () => false,
 ) {
   askCounter = count
   isBoardClosed = closed
   markBoardOpen = opened
   markBoardClosed = shut
+  boardHidden = hidden
 }
 
 /** 세션이 시작할 때: 5초 타이머를 걸고 사용량을 읽는다. */
@@ -286,7 +290,9 @@ export const register: Register = on => {
       if (hint) children.push(Text({ key: `${key}effort`, color: 'warning', bold: true, children: `${hint} ` }))
       if (showHandoff()) children.push(Button({ key: `${key}handoff`, label: '인계 ▸', plain: true, dimColor: true, onPress: () => sendHandoff($) }))
       // 터미널: 상세 앞에 패널을 여닫는 단추를 둔다. 패널의 × 는 Orca 같은 터미널 앱의 창 단추와 겹쳐 찾기 어렵다 (2026-11-22 사용자 보고)
-      if (isBoardClosed()) children.push(Button({ key: 'open-board', label: '세션 ▸', plain: true, dimColor: true, onPress: () => openBoard($) }))
+      if (boardHidden()) {
+        // 결재함을 끈 곳: 여닫기 단추도 두지 않는다
+      } else if (isBoardClosed()) children.push(Button({ key: 'open-board', label: '세션 ▸', plain: true, dimColor: true, onPress: () => openBoard($) }))
       else children.push(Button({ key: 'close-board', label: '세션 ◂', plain: true, dimColor: true, onPress: () => closeBoard($) }))
       children.push(
         Button({
@@ -341,7 +347,7 @@ async function tick($: any) {
   } catch {
     // 목록을 못 읽으면 이전 값을 둔다
   }
-  asks = askCounter() // 세션 보드가 메모리에 가진 개수를 받는다
+  asks = boardHidden() ? NO_ASKS : askCounter() // 세션 보드가 메모리에 가진 개수를 받는다
   $.ui.invalidate('ui.render')
 }
 
@@ -415,7 +421,7 @@ function buildSegs(now: number, isWorking: boolean): Seg[] {
   else if (verify) segs.push({ prio: 1, value: verify.text, level: verify.state === 'ok' ? 'ok' : verify.state === 'fail' ? 'err' : 'warn' })
 
   // 터미널 띠: 그림이 없어 단추 대신 글자 칸으로 쓴다. 이상 칸이라 좁아도 남는다
-  const waiting = asksText(asks)
+  const waiting = boardHidden() ? null : asksText(asks) // 결재함을 끈 곳(Orca 터미널)은 개수를 쓰지 않는다
   if (waiting) {
     const level: Level = ASK_KINDS.find(k => asks[k.key] > 0)?.level ?? 'ok'
     segs.push({ prio: 0, value: mark(level, waiting), level })
