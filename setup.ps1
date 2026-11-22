@@ -77,12 +77,16 @@ if ($Agent -eq 'orca') {
     # session-board (loaded into Claude through CLAUDE_CODE_PLUGIN_DIRS) already runs the same guards, so agent-guard would only repeat them.
     $pluginDirs = [Environment]::GetEnvironmentVariable('CLAUDE_CODE_PLUGIN_DIRS', 'User')
     $sessionBoardLoaded = [bool]$pluginDirs -and ([IO.Path]::GetFullPath($pluginDirs).TrimEnd('\') -eq (Join-Path $root 'claude\plugins'))
+    # agent-band is opt-in: its counts come from terminal-pane status events, and Orca's own agent dashboard
+    # ("needs attention" lane) also covers chat sessions (2026-11-21 decision).
+    $skip = @{ 'agent-band' = "optional; for the chat UI use Orca's agent dashboard (Settings > Experimental)" }
+    if ($sessionBoardLoaded) { $skip['agent-guard'] = 'session-board already guards Claude on this PC' }
     $dirs = @(Get-ChildItem (Join-Path $src 'plugins') -Directory)
-    $install = @($dirs | Where-Object { -not ($_.Name -eq 'agent-guard' -and $sessionBoardLoaded) })
+    $install = @($dirs | Where-Object { -not $skip.ContainsKey($_.Name) })
     $pending = @()
     $failed = @()
-    if ($install.Count -lt $dirs.Count) {
-        Write-Host "Skipped agent-guard: session-board already guards Claude on this PC. To install it anyway: orca plugin install `"$(Join-Path $src 'plugins\agent-guard')`""
+    foreach ($d in @($dirs | Where-Object { $skip.ContainsKey($_.Name) })) {
+        Write-Host "Skipped $($d.Name): $($skip[$d.Name]). To install it anyway: orca plugin install `"$($d.FullName)`""
     }
     if ($SkipPlugins -or -not $realTarget) {
         Write-Host "Dry run: would install $(($install | ForEach-Object Name) -join ', ') with 'orca plugin install'."
