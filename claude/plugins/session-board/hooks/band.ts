@@ -132,10 +132,20 @@ export async function bandPrompt($: any, e?: any) {
 function sendHandoff($: any) {
   handoff = 'sent'
   $.ui.invalidate('ui.render')
-  $.prompt.submit({ text: '/handoff' }).catch(() => {
-    handoff = 'idle'
-    $.ui.invalidate('ui.render')
-  })
+  // 누른 것이 보이게 바로 알린다: 턴이 도는 중이면 /handoff 는 그 턴이 끝난 뒤에 시작해 한참 반응이 없다 (2026-11-22 사용자 보고)
+  void $.ui.toast('인계를 보냈다. 지금 하던 턴이 끝나면 /handoff 를 시작한다')
+  // prompt.submit 은 / 로 시작하는 글을 거절한다: 명령은 command.run 으로 부른다. 플러그인 명령은 relay-skills:handoff 처럼 이름이 붙을 수 있어 목록에서 찾는다
+  $.command.list()
+    .then((commands: { name: string }[]) => {
+      const found = commands.find(c => c.name === 'handoff' || c.name.endsWith(':handoff'))
+      if (!found) throw new Error('handoff 명령이 없다')
+      return $.command.run({ command: found.name })
+    })
+    .catch((error: unknown) => {
+      void $.ui.toast(`인계를 보내지 못했다: ${error instanceof Error ? error.message : String(error)}. 입력창에 /handoff 를 직접 입력한다`)
+      handoff = 'idle'
+      $.ui.invalidate('ui.render')
+    })
 }
 
 /** 하위 에이전트가 시작했다: 하위 수를 다시 센다. */

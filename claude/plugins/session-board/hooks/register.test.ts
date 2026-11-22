@@ -700,6 +700,35 @@ test('띠: 터미널에서 패널이 열려 있으면 "세션 ◂" 로 닫고, �
   await ui.unmount()
 })
 
+test('띠: 인계 단추는 /handoff 명령을 부르고 바로 토스트로 알린다. 실패하면 이유를 알리고 단추를 되살린다', async ($, on) => {
+  const seen = fakeBoard(on, {})
+  on('session.usage', () => ({ value: { context: { tokens: 60, window: 100 } } }) as any) // 컨텍스트 60%: 인계 단추가 보인다
+  on('agent.list', () => ({ value: [] }) as any)
+  let installed = false // relay-skills 가 없으면 보내기에 실패한다
+  const ran: string[] = []
+  on('command.list', () => ({ value: [{ name: 'session_board' }, ...(installed ? [{ name: 'relay-skills:handoff' }] : [])] }) as any)
+  on('command.run', { command: 'relay-skills:handoff' } as any, (_: any, e: any) => {
+    ran.push(e.command)
+    return { text: undefined } as any
+  })
+  on('ui.render', { component: 'AbovePrompt' }, ($: any, e: any) => $.ui.resolve(e).Text({ children: 'ponytail 띠' }))
+  await $.session.start({ ...START, surface: 'terminal' } as any)
+  const ui = await $.ui.mount({ plugin: 'session-board', component: 'AbovePrompt', props: BAND_PROPS, surface: 'terminal' } as any)
+  // 실패: 이유를 알리고 다시 누를 수 있다
+  await ui.press({ key: 'f1handoff' })
+  await new Promise(r => setTimeout(r, 10))
+  expect(seen.toasts[0]).toMatch(/^인계를 보냈다/)
+  expect(seen.toasts[1]).toMatch(/^인계를 보내지 못했다: handoff 명령이 없다/)
+  expect(await ui.find({ type: 'Button', text: /인계/ } as any)).toBeTruthy()
+  installed = true // 성공: 명령을 부르고 단추를 숨긴다
+  await ui.press({ key: 'f1handoff' })
+  await new Promise(r => setTimeout(r, 10))
+  expect(ran).toEqual(['relay-skills:handoff'])
+  expect(seen.toasts.length).toBe(3)
+  expect(await ui.find({ type: 'Button', text: /인계/ } as any)).toBeFalsy()
+  await ui.unmount()
+})
+
 // 한 창(세션 보드 아래의 확인 카드)은 시험 도구로 그릴 수 없다: 도구 호출이 붙잡혀 있는 동안 패널 그리기가 그 호출을 기다린다. 앱에서 확인한다
 
 // ---- 검토 고침 -------------------------------------------------------------------------
